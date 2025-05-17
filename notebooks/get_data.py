@@ -71,11 +71,7 @@ for col in ['vol20', 'vol60', 'vol_ratio', 'VIX']:
 # Drop the first row with NaN since there is no std yet
 vol_df_std = vol_df_std.dropna(how='all')
 
-# Save prices to CSV (contains all sectors and S&P 500)
-prices[sector_tickers].to_csv('./data/prices.csv', index=True)
-
-# Save returns to CSV (contains all sectors and S&P 500)
-log_returns[sector_tickers].to_csv('./data/returns.csv', index=True)
-
-# Save volatility indicators separately
-vol_df_std[['vol20', 'vol_ratio', 'VIX']].to_csv('./data/vola.csv', index=True)
+# Save the dataframes to parquet files
+prices[sector_tickers].to_parquet('./data/prices.parquet', index=True, engine='pyarrow')
+log_returns[sector_tickers].to_parquet('./data/returns.parquet', index=True, engine='pyarrow')
+vol_df_std[['vol20', 'vol_ratio', 'VIX']].to_parquet('./data/vola.parquet', index=True, engine='pyarrow')
