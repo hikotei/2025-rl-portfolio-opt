@@ -2,10 +2,11 @@
 
 This repository implements **portfolio optimization** using both:
 
-- **Mean-Variance Optimization (MVO)** via PyPortfolioOpt
-- **Deep Reinforcement Learning (DRL)** using PPO from Stable-Baselines3
+- Mean-Variance Optimization (MVO) via PyPortfolioOpt
+- Deep Reinforcement Learning (DRL) using PPO from Stable-Baselines3
 
-Inspired by the 2023 paper [*"Deep Reinforcement Learning and Mean-Variance Strategies for Responsible Portfolio Optimization"*.](https://icaps23.icaps-conference.org/papers/finplan/FinPlan23_paper_4.pdf)
+Inspired by the 2023 paper:  
+[*"Deep Reinforcement Learning and Mean-Variance Strategies for Responsible Portfolio Optimization"*.](https://icaps23.icaps-conference.org/papers/finplan/FinPlan23_paper_4.pdf)
 
 ---
 
