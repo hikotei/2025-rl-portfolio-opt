@@ -1,4 +1,4 @@
-# 🧠 Portfolio Optimization Framework
+# 📈 Portfolio Optimization Framework
 
 This repository implements **portfolio optimization** using both:
 
@@ -69,14 +69,13 @@ get_data.py                     # Downloads Yahoo Finance data and saves returns
 
 ```bash
 # Prepare data
-python get_data.py
-# this creates returns.parquet and prices.parquet in ./portfolio_opt/data
+...
 
 # Run MVO backtest
-python run_backtest.py
+...
 
 # Train DRL agent
-python train/train_drl.py
+...
 ```
 
 ---
@@ -93,5 +92,3 @@ python train/train_drl.py
 ## 🧑‍💻 Author
 
 Developed by [@hikotei](https://github.com/hikotei) with assistance from ChatGPT.
-
----

@@ -32,8 +32,6 @@ class MVOOptimizer:
         if return_window.isnull().any().any():
             return None
 
-        tickers = return_window.columns.tolist()
-
         # Estimate covariance matrix with Ledoit-Wolf shrinkage
         lw = LedoitWolf()
         lw.fit(return_window)
