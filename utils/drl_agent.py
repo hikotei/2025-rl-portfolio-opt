@@ -2,10 +2,9 @@ import numpy as np
 import pandas as pd
 from stable_baselines3 import PPO
 from stable_baselines3.common.vec_env import DummyVecEnv
-from stable_baselines3.common.env_util import make_vec_env
 
 # from stable_baselines3.common.callbacks import BaseCallback
-from typing import Optional, Dict, Union, List
+from typing import Optional, Dict, Union, List, Any
 
 
 class DRLAgent:
@@ -114,7 +113,7 @@ class DRLAgent:
             action, _ = self.model.predict(obs, deterministic=True)
             # not that there is no truncated output !!!
             obs, reward, terminated, info = self.env.step(action)
-            done = terminated.any() # no truncated
+            done = terminated.any()  # no truncated
 
             # Handle info as a list of dictionaries for multiple environments
             if isinstance(info, list):
@@ -139,8 +138,12 @@ class DRLAgent:
             print("\nTraining Summary:")
             print(f"Final Portfolio Value (First Env): ${portfolio_values[-1]:,.2f}")
             if len(final_portfolio_values) > 1:
-                print(f"Average Final Portfolio Value (All Envs): ${np.mean(final_portfolio_values):,.2f}")
-                print(f"Std Final Portfolio Value (All Envs): ${np.std(final_portfolio_values):,.2f}")
+                print(
+                    f"Average Final Portfolio Value (All Envs): ${np.mean(final_portfolio_values):,.2f}"
+                )
+                print(
+                    f"Std Final Portfolio Value (All Envs): ${np.std(final_portfolio_values):,.2f}"
+                )
             print("\nPerformance Metrics (First Env):")
             for metric, value in self.training_metrics.items():
                 if isinstance(value, float):
@@ -223,7 +226,7 @@ class DRLAgent:
         self,
         portfolio_values: Union[List[float], np.ndarray, pd.Series],
         risk_free_rate: float = 0.02,
-    ) -> Dict[str, float]:
+    ) -> Dict[str, Any | float]:
         """
         Calculate portfolio performance metrics.
 
