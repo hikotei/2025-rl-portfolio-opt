@@ -1,6 +1,6 @@
 import pandas as pd
 import numpy as np
-from portfolio_opt.models.mvo import MVOOptimizer
+from models.mvo import MVOOptimizer
 
 
 class MVOBacktester:
@@ -55,6 +55,7 @@ class MVOBacktester:
             price_row = self.prices.loc[date]
 
             weights = self.optimizer.get_weights(ret_window)
+
             if weights is None:
                 continue
 

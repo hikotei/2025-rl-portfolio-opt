@@ -57,10 +57,11 @@ class MVOOptimizer:
             objective_functions.sharpe_ratio,
             objective_args=(ef.expected_returns, ef.cov_matrix),
             constraints=[
-                {"type": "eq", "fun": lambda w: np.sum(w) - 1},
-                {"type": "ineq", "fun": lambda w: w},            # w >= 0
-                {"type": "ineq", "fun": lambda w: 1 - w},        # w <= 1
+                {"type": "eq", "fun": lambda w: np.sum(w) - 1},  # sum(w) = 1
+                {"type": "ineq", "fun": lambda w: w},  # w >= 0
+                {"type": "ineq", "fun": lambda w: 1 - w},  # w <= 1
             ],
         )
 
-        return dict(zip(tickers, weights_array))
+        # TODO : do i need to convert to dict or is ordered dict also fine ?
+        return dict(weights_array)

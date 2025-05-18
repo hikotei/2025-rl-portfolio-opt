@@ -1,3 +1,3 @@
 # RL-Portfolio-Optimization
 
-Seminar project in summer term 2025
+seminar project in summer term 2025
