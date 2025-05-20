@@ -1,6 +1,6 @@
 import pandas as pd
 import numpy as np
-from models.mvo import MVOOptimizer
+from mvo import MVOOptimizer
 
 
 class MVOBacktester:

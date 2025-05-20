@@ -24,8 +24,7 @@ class DRLAgent:
         learning_rate: float = 0.0003,
         gamma: float = 0.99,
         gae_lambda: float = 0.95,
-        ent_coef: float = 0.01,
-        clip_range: float = 0.2,
+        clip_range: float = 0.25,
     ):
         """
         Initialize PPO agent with given environment and parameters.
@@ -80,7 +79,6 @@ class DRLAgent:
             learning_rate=learning_rate,
             gamma=gamma,
             gae_lambda=gae_lambda,
-            ent_coef=ent_coef,
             clip_range=clip_range,
         )
         self.training_metrics = None

@@ -9,13 +9,13 @@ from typing import Dict, Tuple, Optional, Union, List
 
 class PortfolioEnv(gym.Env):
     """
-    A Gymnasium-compatible environment for portfolio optimization using Deep Reinforcement Learning (DRL).
+    A Gymnasium-compatible environment for portfolio optimization 
+    using Deep Reinforcement Learning (DRL). 
+    
+    This environment simulates a trading scenario where an agent decides how to
+    allocate money across different assets to maximize risk adjusted returns.
 
-    This environment simulates a trading scenario where an agent needs to decide how to
-    allocate money across different assets to maximize returns while managing risk.
-
-    The reward here is the Differential Sharpe Ratio (DSR),
-    which is a measure of the risk-adjusted return of the portfolio
+    The reward is the Differential Sharpe Ratio (DSR).
 
     State space includes:
     - Historical returns matrix
@@ -59,7 +59,13 @@ class PortfolioEnv(gym.Env):
         self.prev_B_t = 0.0
         self.prev_sharpe = 0.0
 
-        # Get number of assets
+        # Identify columns with NaN values
+        self.nan_cols = []
+        for col in returns_df.columns:
+            if returns_df[col].isna().any() or prices_df[col].isna().any():
+                self.nan_cols.append(col)
+
+        # Get number of assets (including those with NaNs)
         self.n_assets = len(returns_df.columns)
 
         # Define action space (portfolio weights)
@@ -127,7 +133,20 @@ class PortfolioEnv(gym.Env):
 
         # Convert action to weights using softmax to ensure they sum to 1
         exp_action = np.exp(action)
-        self.weights = exp_action / np.sum(exp_action)
+        weights = exp_action / np.sum(exp_action)
+
+        # Handle NaN columns - set weights to 0 for assets with missing data
+        for i, col in enumerate(self.returns_df.columns):
+            if col in self.nan_cols:
+                try:
+                    weights[i] = 0
+                except Exception as e:
+                    print(f"Error setting weight for {col}: {e}")
+                    print(f"Action: {action}")
+                    print("Weights", weights, type(weights))
+
+        # Assign weights
+        self.weights = weights
         self.previous_weights = self.weights.copy()
 
         # Calculate returns
@@ -183,6 +202,9 @@ class PortfolioEnv(gym.Env):
         returns_window = self.returns_df.iloc[
             self.current_step - self.window_size : self.current_step
         ].values
+
+        # Replace NaN values with 0 in returns window
+        returns_window = np.nan_to_num(returns_window, nan=0.0)
 
         # Get volatility features
         vol_features = self.vol_df.iloc[self.current_step].values

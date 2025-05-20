@@ -225,6 +225,7 @@ class PortfolioEnv(gym.Env):
         seed: Optional[int] = None,
     ) -> Tuple[np.ndarray, dict]:
         super().reset(seed=seed)
+        
         # Start after enough data for first observation window
         self.current_step = self.window_size
         self.portfolio_value = self.initial_balance
