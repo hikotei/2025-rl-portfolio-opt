@@ -1,7 +1,8 @@
 import numpy as np
 import pandas as pd
 from stable_baselines3 import PPO
-from stable_baselines3.common.vec_env import DummyVecEnv
+from stable_baselines3.common.vec_env import SubprocVecEnv
+from stable_baselines3.common.utils import set_random_seed
 
 # from stable_baselines3.common.callbacks import BaseCallback
 from typing import Optional, Dict, Union, List, Any
@@ -25,6 +26,7 @@ class DRLAgent:
         gamma: float = 0.99,
         gae_lambda: float = 0.95,
         clip_range: float = 0.25,
+        seed: int = 0,
     ):
         """
         Initialize PPO agent with given environment and parameters.
@@ -51,24 +53,44 @@ class DRLAgent:
                 Factor for trade-off of bias vs variance for GAE (default: 0.95)
             clip_range:
                 Clipping parameter for PPO (default: 0.2)
+            seed:
+                Random seed for reproducibility (default: 0)
         """
 
-        # Create a function that returns a new environment instance
-        def make_env():
-            # Create a new instance of the environment with the same parameters
-            return type(env)(
-                returns_df=env.returns_df,
-                prices_df=env.prices_df,
-                vol_df=env.vol_df,
-                window_size=env.window_size,
-                transaction_cost=env.transaction_cost,
-                initial_balance=env.initial_balance,
-                reward_scaling=env.reward_scaling,
-                eta=env.eta,
-            )
+        def make_env(rank: int, seed: int = 0):
+            """
+            Utility function for multiprocessed env.
+
+            :param rank: (int) index of the subprocess
+            :param seed: (int) the initial seed for RNG
+            """
+
+            def _init():
+                # create new env from the same class as the given env
+                new_env = type(env)(
+                    returns_df=env.returns_df,
+                    prices_df=env.prices_df,
+                    vol_df=env.vol_df,
+                    window_size=env.window_size,
+                    transaction_cost=env.transaction_cost,
+                    initial_balance=env.initial_balance,
+                    reward_scaling=env.reward_scaling,
+                    eta=env.eta,
+                )
+                # use a seed for reproducibility
+                # Important: use a different seed for each environment
+                # otherwise they would generate the same experiences
+                new_env.reset(seed=seed+rank)
+                return new_env
+
+            set_random_seed(seed)
+            return _init
 
         # Create vectorized environment with proper closures
-        self.env = DummyVecEnv([make_env for _ in range(n_envs)])
+        self.env = SubprocVecEnv(
+            [make_env(i, seed) for i in range(n_envs)],
+            start_method="fork"
+        )
 
         self.model = PPO(
             policy,

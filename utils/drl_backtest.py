@@ -1,5 +1,7 @@
 from copy import deepcopy
 from datetime import datetime
+import os
+from utils.drl_agent import DRLAgent
 
 def generate_sliding_windows(start_year=2006, end_year=2021):
     """
@@ -73,14 +75,42 @@ def select_best_agent(agents, PortfolioEnv, returns_df, prices_df, vol_df, windo
 
     best_agent = None
     best_score = -float("inf")
+    best_model_path = None
 
-    for agent in agents:
+    for i, agent in enumerate(agents):
         metrics = agent.evaluate(val_env, n_episodes=1)
         val_score = metrics.get("Sharpe ratio", -float("inf"))
 
         if val_score > best_score:
-            best_agent = deepcopy(agent)
+            # Save model weights to temporary file
+            temp_path = f"temp_model_{i}.zip"
+            agent.model.save(temp_path)
+            best_model_path = temp_path
             best_score = val_score
+
+    # Create new agent with best model
+    if best_model_path is not None:
+        train_returns = returns_df[window["train"][0]:window["train"][1]]
+        train_prices = prices_df[window["train"][0]:window["train"][1]]
+        train_vol = vol_df[window["train"][0]:window["train"][1]]
+        train_env = make_env(PortfolioEnv, train_returns, train_prices, train_vol)
+        
+        best_agent = DRLAgent(
+            env=train_env,
+            model_name='ppo',
+            n_envs=10,
+            n_steps=756,
+            batch_size=1260,
+            n_epochs=16,
+            learning_rate=3e-4,
+            gamma=0.9,
+            gae_lambda=0.9,
+            clip_range=0.25,
+        )
+        best_agent.model = best_agent.model.load(best_model_path)
+        
+        # Clean up temporary file
+        os.remove(best_model_path)
 
     return best_agent
 
