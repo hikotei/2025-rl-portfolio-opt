@@ -283,6 +283,7 @@ class DRLAgent:
         """
         all_episode_rewards = []
         all_episode_portfolio_values = []
+        all_episode_weights_history = []  # Initialize weights history collector
 
         for episode in range(n_eval_episodes):
             obs, info = eval_env.reset()
@@ -291,6 +292,10 @@ class DRLAgent:
             current_episode_portfolio_values = [
                 getattr(eval_env, "initial_balance", 100000)
             ]
+            current_episode_weights_history = []
+            if hasattr(eval_env, 'get_current_weights'):
+                current_episode_weights_history.append(eval_env.get_current_weights())
+            # else: pass # Assuming PortfolioEnv, get_current_weights should exist.
 
             while not done:
                 action, _ = self.model.predict(obs, deterministic=deterministic)
@@ -308,11 +313,15 @@ class DRLAgent:
                     current_episode_portfolio_values.append(portfolio_val)
                 else:
                     current_episode_portfolio_values.append(
-                        current_episode_portfolio_values[-1] + reward
+                        current_episode_portfolio_values[-1] + reward # Fallback, less accurate
                     )
+
+                if hasattr(eval_env, 'get_current_weights'):
+                    current_episode_weights_history.append(eval_env.get_current_weights())
 
             all_episode_rewards.append(episode_total_reward)
             all_episode_portfolio_values.append(current_episode_portfolio_values)
+            all_episode_weights_history.append(current_episode_weights_history)
 
         mean_reward = (
             np.mean(all_episode_rewards) if len(all_episode_rewards) > 0 else np.nan
@@ -324,17 +333,58 @@ class DRLAgent:
         eval_metrics = {}
         final_portfolio_value_first_episode = np.nan
 
+        weights_for_metrics = None
+        if n_eval_episodes > 0 and len(all_episode_weights_history) > 0:
+            weights_for_metrics = all_episode_weights_history[0]
+
         if (
             n_eval_episodes > 0
             and len(all_episode_portfolio_values) > 0
             and len(all_episode_portfolio_values[0]) > 1
         ):
-            eval_metrics = self.calc_metrics(all_episode_portfolio_values[0])
+            if hasattr(eval_env, 'calc_metrics'):
+                eval_metrics = eval_env.calc_metrics(
+                    portfolio_values=all_episode_portfolio_values[0],
+                    weights_history=weights_for_metrics
+                )
+            else:
+                eval_metrics = self.calc_metrics(all_episode_portfolio_values[0])
+                eval_metrics['warning'] = "eval_env has no calc_metrics, turnover calculation skipped."
             final_portfolio_value_first_episode = all_episode_portfolio_values[0][-1]
         elif n_eval_episodes > 0:
+            # This condition handles cases where the episode might have run, but produced very short (<=1) portfolio_values arrays.
+            # Initialize eval_metrics if not already done by a successful calc_metrics call
+            if 'eval_metrics' not in locals() or not eval_metrics: # Check if eval_metrics is empty or not created
+                 # Get default structure from self.calc_metrics
+                 eval_metrics = self.calc_metrics(
+                     [getattr(eval_env, "initial_balance", 100000), getattr(eval_env, "initial_balance", 100000)] # dummy
+                 )
+                 # Mark values as NaN as they are based on dummy data
+                 for key in list(eval_metrics.keys()):
+                     if key not in ['error', 'Portfolio turnover']: # Keep error or the NaN turnover
+                         eval_metrics[key] = np.nan
+                 if hasattr(eval_env, 'initial_balance'): # Try to set initial_balance if available
+                     eval_metrics['initial_balance'] = getattr(eval_env, "initial_balance", np.nan)
+
             final_portfolio_value_first_episode = getattr(
-                eval_env, "initial_balance", np.nan
+                eval_env, "initial_balance", np.nan # or all_episode_portfolio_values[0][0] if list not empty
             )
+            # If all_episode_portfolio_values[0] exists and is not empty, use its first value as initial for FPV.
+            if len(all_episode_portfolio_values) > 0 and len(all_episode_portfolio_values[0]) > 0:
+                 final_portfolio_value_first_episode = all_episode_portfolio_values[0][0]
+
+
+        # Ensure eval_metrics is initialized before adding more keys if it wasn't above
+        if 'eval_metrics' not in locals() or not eval_metrics:
+            eval_metrics = self.calc_metrics( # Call self.calc_metrics as a fallback
+                 [getattr(eval_env, "initial_balance", 100000), getattr(eval_env, "initial_balance", 100000)] # dummy
+            )
+            for key in list(eval_metrics.keys()):
+                if key not in ['error', 'Portfolio turnover']:
+                    eval_metrics[key] = np.nan
+            if hasattr(eval_env, 'initial_balance'):
+                 eval_metrics['initial_balance'] = getattr(eval_env, "initial_balance", np.nan)
+
 
         eval_metrics["mean_reward"] = mean_reward
         eval_metrics["std_reward"] = std_reward
@@ -342,6 +392,12 @@ class DRLAgent:
         eval_metrics["final_portfolio_value_first_episode"] = (
             final_portfolio_value_first_episode
         )
+        # Ensure 'Portfolio turnover' is present, defaulting to np.nan if not calculated
+        if 'Portfolio turnover' not in eval_metrics:
+            eval_metrics['Portfolio turnover'] = np.nan
+        if 'initial_balance' not in eval_metrics and hasattr(eval_env, 'initial_balance'):
+            eval_metrics['initial_balance'] = getattr(eval_env, "initial_balance", np.nan)
+
 
         return eval_metrics
 
