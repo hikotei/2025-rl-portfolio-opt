@@ -88,6 +88,7 @@ class PortfolioEnv(gym.Env):
         # Initialize weights and cash weight
         self.weights = np.zeros(self.n_assets, dtype=np.float32)
         self.w_c = 1.0
+        self.weights_history = []
 
         # Initialize state
         self.reset()
@@ -118,6 +119,7 @@ class PortfolioEnv(gym.Env):
         self.prev_A_t = 0.0
         self.prev_B_t = 0.0
         self.prev_sharpe = 0.0
+        self.weights_history = []
         return self._get_observation(), {}
 
     def step(self, action: np.ndarray) -> Tuple[np.ndarray, float, bool, bool, Dict]:
@@ -169,6 +171,8 @@ class PortfolioEnv(gym.Env):
         }
 
         # Update weights and cash weight for next round using previous (t-1) prices
+        self.weights_history.append(self.weights.copy())
+        self.previous_weights = self.weights.copy()
         self.weights = np.array(
             [
                 shares[t] * prev_prices[t] / self.portfolio_value
@@ -339,6 +343,7 @@ class PortfolioEnv(gym.Env):
         self,
         portfolio_values: Union[List[float], np.ndarray, pd.Series],
         risk_free_rate: float = 0.02,
+        weights_history: Optional[List[np.ndarray]] = None,
     ):
         """
         Calculate various portfolio performance metrics.
@@ -346,6 +351,8 @@ class PortfolioEnv(gym.Env):
         Args:
             portfolio_values: Array of portfolio values over time
             risk_free_rate: Annual risk-free rate (default: 2%)
+            weights_history: Optional list of portfolio weights history.
+                             If None, uses self.weights_history.
 
         Returns:
             Dictionary containing various portfolio metrics
@@ -356,6 +363,16 @@ class PortfolioEnv(gym.Env):
 
         # Calculate daily returns
         daily_returns = np.diff(portfolio_values) / portfolio_values[:-1]
+
+        # Use provided weights_history or internal one
+        if weights_history is None:
+            weights_history = self.weights_history
+
+        # Calculate portfolio turnover
+        if weights_history and len(weights_history) > 1:
+            turnover = np.sum(np.abs(np.diff(np.array(weights_history), axis=0))) / (len(weights_history) -1)
+        else:
+            turnover = np.nan
 
         # Annual return (assuming 252 trading days)
         annual_return = (portfolio_values[-1] / portfolio_values[0]) ** (
@@ -411,8 +428,8 @@ class PortfolioEnv(gym.Env):
         # Value at Risk (95%)
         var = np.percentile(daily_returns, 5)
 
-        # Portfolio turnover (average daily change in weights)
-        daily_change = np.mean(
+        # Mean absolute daily return
+        mean_daily_return_abs = np.mean(
             np.abs(np.diff(portfolio_values) / portfolio_values[:-1])
         )
 
@@ -433,5 +450,12 @@ class PortfolioEnv(gym.Env):
             "Kurtosis": kurtosis,
             "Tail ratio": tail_ratio,
             "Daily value at risk": var,
-            "Portfolio turnover": daily_change,
+            "Portfolio turnover": turnover,
+            "Mean daily return abs": mean_daily_return_abs,
         }
+
+    def get_current_weights(self) -> np.ndarray:
+        """
+        Returns a copy of the current portfolio weights.
+        """
+        return self.weights.copy()
