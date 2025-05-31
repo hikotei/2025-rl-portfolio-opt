@@ -6,6 +6,7 @@ from stable_baselines3.common.vec_env import SubprocVecEnv
 from stable_baselines3.common.utils import set_random_seed
 from typing import Optional, Dict, Union, List, Any, Callable
 
+
 class DRLAgent:
     def __init__(
         self,
@@ -33,7 +34,7 @@ class DRLAgent:
             "initial_balance": env.initial_balance,
             "reward_scaling": env.reward_scaling,
         }
-        if hasattr(env, 'eta'):
+        if hasattr(env, "eta"):
             env_params["eta"] = env.eta
         self.original_env_kwargs = env_params
 
@@ -45,23 +46,27 @@ class DRLAgent:
                 new_env = env_class(**current_env_kwargs)
                 new_env.reset(seed=seed + rank)
                 return new_env
+
             set_random_seed(seed)
             return _init
 
         self.env = SubprocVecEnv(
-            [make_env_closure(i, seed, self.original_env_class, self.original_env_kwargs) for i in range(n_envs)],
-            start_method="fork"
+            [
+                make_env_closure(
+                    i, seed, self.original_env_class, self.original_env_kwargs
+                )
+                for i in range(n_envs)
+            ],
+            start_method="fork",
         )
 
         if policy_kwargs is None:
             policy_kwargs = dict(
-                activation_fn=torch.nn.Tanh,
-                net_arch=[64, 64],
-                log_std_init=-1.0
+                activation_fn=torch.nn.Tanh, net_arch=[64, 64], log_std_init=-1.0
             )
 
-        if 'log_std_init' in policy_kwargs:
-            policy_kwargs['log_std_init'] = float(policy_kwargs['log_std_init'])
+        if "log_std_init" in policy_kwargs:
+            policy_kwargs["log_std_init"] = float(policy_kwargs["log_std_init"])
 
         self.model = PPO(
             policy,
@@ -74,15 +79,13 @@ class DRLAgent:
             gae_lambda=gae_lambda,
             clip_range=clip_range,
             policy_kwargs=policy_kwargs,
-            seed=seed
+            seed=seed,
         )
         self.training_metrics = None
 
     def train(self, total_timesteps: int = 100_000, tb_log_name: str = "ppo"):
         self.model.learn(
-            total_timesteps=total_timesteps,
-            progress_bar=True,
-            tb_log_name=tb_log_name
+            total_timesteps=total_timesteps, progress_bar=True, tb_log_name=tb_log_name
         )
         print(f"\nTraining complete. Trained for {total_timesteps} timesteps.")
         print(f"TensorBoard logs saved to directory: {tb_log_name}")
@@ -110,7 +113,9 @@ class DRLAgent:
             obs, info = eval_env.reset()
             done = False
             episode_total_reward = 0.0
-            current_episode_portfolio_values = [getattr(eval_env, 'initial_balance', 100000)]
+            current_episode_portfolio_values = [
+                getattr(eval_env, "initial_balance", 100000)
+            ]
 
             while not done:
                 action, _ = self.model.predict(obs, deterministic=deterministic)
@@ -127,27 +132,41 @@ class DRLAgent:
                 if portfolio_val is not None:
                     current_episode_portfolio_values.append(portfolio_val)
                 else:
-                    current_episode_portfolio_values.append(current_episode_portfolio_values[-1] + reward)
+                    current_episode_portfolio_values.append(
+                        current_episode_portfolio_values[-1] + reward
+                    )
 
             all_episode_rewards.append(episode_total_reward)
             all_episode_portfolio_values.append(current_episode_portfolio_values)
 
-        mean_reward = np.mean(all_episode_rewards) if len(all_episode_rewards) > 0 else np.nan
-        std_reward = np.std(all_episode_rewards) if len(all_episode_rewards) > 0 else np.nan
+        mean_reward = (
+            np.mean(all_episode_rewards) if len(all_episode_rewards) > 0 else np.nan
+        )
+        std_reward = (
+            np.std(all_episode_rewards) if len(all_episode_rewards) > 0 else np.nan
+        )
 
         eval_metrics = {}
         final_portfolio_value_first_episode = np.nan
 
-        if n_eval_episodes > 0 and len(all_episode_portfolio_values) > 0 and len(all_episode_portfolio_values[0]) > 1:
+        if (
+            n_eval_episodes > 0
+            and len(all_episode_portfolio_values) > 0
+            and len(all_episode_portfolio_values[0]) > 1
+        ):
             eval_metrics = self.calc_metrics(all_episode_portfolio_values[0])
             final_portfolio_value_first_episode = all_episode_portfolio_values[0][-1]
         elif n_eval_episodes > 0:
-            final_portfolio_value_first_episode = getattr(eval_env, 'initial_balance', np.nan)
+            final_portfolio_value_first_episode = getattr(
+                eval_env, "initial_balance", np.nan
+            )
 
         eval_metrics["mean_reward"] = mean_reward
         eval_metrics["std_reward"] = std_reward
         eval_metrics["n_eval_episodes"] = n_eval_episodes
-        eval_metrics["final_portfolio_value_first_episode"] = final_portfolio_value_first_episode
+        eval_metrics["final_portfolio_value_first_episode"] = (
+            final_portfolio_value_first_episode
+        )
 
         return eval_metrics
 
@@ -157,13 +176,29 @@ class DRLAgent:
         risk_free_rate: float = 0.02,
     ) -> Dict[str, Any | float]:
         default_metrics = {
-            "Annual return": np.nan, "Cumulative returns": np.nan, "Annual volatility": np.nan,
-            "Sharpe ratio": np.nan, "Calmar ratio": np.nan, "Stability": np.nan, "Max drawdown": np.nan,
-            "Omega ratio": np.nan, "Sortino ratio": np.nan, "Skew": np.nan, "Kurtosis": np.nan,
-            "Tail ratio": np.nan, "Daily value at risk (95%)": np.nan, "Portfolio turnover": np.nan,
+            "Annual return": np.nan,
+            "Cumulative returns": np.nan,
+            "Annual volatility": np.nan,
+            "Sharpe ratio": np.nan,
+            "Calmar ratio": np.nan,
+            "Stability": np.nan,
+            "Max drawdown": np.nan,
+            "Omega ratio": np.nan,
+            "Sortino ratio": np.nan,
+            "Skew": np.nan,
+            "Kurtosis": np.nan,
+            "Tail ratio": np.nan,
+            "Daily value at risk (95%)": np.nan,
+            "Portfolio turnover": np.nan,
         }
-        if not isinstance(portfolio_values, (list, np.ndarray, pd.Series)) or len(portfolio_values) < 2:
-            return {**default_metrics, "error": "Portfolio values must be a list/array with at least 2 elements."}
+        if (
+            not isinstance(portfolio_values, (list, np.ndarray, pd.Series))
+            or len(portfolio_values) < 2
+        ):
+            return {
+                **default_metrics,
+                "error": "Portfolio values must be a list/array with at least 2 elements.",
+            }
 
         portfolio_values = np.array(portfolio_values, dtype=float)
 
@@ -177,37 +212,60 @@ class DRLAgent:
             non_zero_indices = np.where(portfolio_values != 0)[0]
             if len(non_zero_indices) > 0:
                 first_non_zero_idx = non_zero_indices[0]
-                if first_non_zero_idx < len(portfolio_values) - 1: # Need at least 2 points after this
+                if (
+                    first_non_zero_idx < len(portfolio_values) - 1
+                ):  # Need at least 2 points after this
                     portfolio_values = portfolio_values[first_non_zero_idx:]
-                else: # Not enough data after removing initial zeros
-                    return {**default_metrics, "error": "Not enough data after removing initial zero(s)."}
-            else: # All values are zero
-                 return {**default_metrics, "error": "All portfolio values are zero."}
+                else:  # Not enough data after removing initial zeros
+                    return {
+                        **default_metrics,
+                        "error": "Not enough data after removing initial zero(s).",
+                    }
+            else:  # All values are zero
+                return {**default_metrics, "error": "All portfolio values are zero."}
 
-        if len(portfolio_values) < 2 : # Check again after potential slicing
-             return {**default_metrics, "error": "Not enough data points after processing initial values."}
-
+        if len(portfolio_values) < 2:  # Check again after potential slicing
+            return {
+                **default_metrics,
+                "error": "Not enough data points after processing initial values.",
+            }
 
         denominator = portfolio_values[:-1].copy()
-        valid_denominator_mask = denominator > 1e-9 # Check for positive, non-tiny values
+        valid_denominator_mask = (
+            denominator > 1e-9
+        )  # Check for positive, non-tiny values
 
         daily_returns = np.full_like(denominator, np.nan)
         if np.any(valid_denominator_mask):
             diff_values = np.diff(portfolio_values)
-            daily_returns[valid_denominator_mask] = diff_values[valid_denominator_mask] / denominator[valid_denominator_mask]
+            daily_returns[valid_denominator_mask] = (
+                diff_values[valid_denominator_mask]
+                / denominator[valid_denominator_mask]
+            )
 
         daily_returns = daily_returns[~np.isnan(daily_returns)]
 
         if len(daily_returns) == 0:
-            return {**default_metrics, "error": "No valid daily returns could be calculated."}
+            return {
+                **default_metrics,
+                "error": "No valid daily returns could be calculated.",
+            }
 
-        pv_current_initial = portfolio_values[0] # This is the first value used for calculation after any slicing
+        pv_current_initial = portfolio_values[
+            0
+        ]  # This is the first value used for calculation after any slicing
         pv_final = portfolio_values[-1]
 
         # Use pv_initial_original for cumulative return if it makes sense, or pv_current_initial
         # For consistency, using pv_current_initial as the basis for returns calc after data cleaning
-        annual_return = (pv_final / pv_current_initial) ** (252 / len(daily_returns)) - 1 if pv_current_initial != 0 else np.nan
-        cumulative_return = (pv_final / pv_current_initial) - 1 if pv_current_initial != 0 else np.nan
+        annual_return = (
+            (pv_final / pv_current_initial) ** (252 / len(daily_returns)) - 1
+            if pv_current_initial != 0
+            else np.nan
+        )
+        cumulative_return = (
+            (pv_final / pv_current_initial) - 1 if pv_current_initial != 0 else np.nan
+        )
 
         annual_volatility = np.std(daily_returns) * np.sqrt(252)
 
@@ -215,22 +273,42 @@ class DRLAgent:
         excess_returns = daily_returns - daily_risk_free_rate
         std_dev_returns = np.std(daily_returns)
 
-        sharpe_ratio = np.mean(excess_returns) / std_dev_returns * np.sqrt(252) if std_dev_returns > 1e-9 else np.nan
+        sharpe_ratio = (
+            np.mean(excess_returns) / std_dev_returns * np.sqrt(252)
+            if std_dev_returns > 1e-9
+            else np.nan
+        )
 
-        rolling_max = np.maximum.accumulate(portfolio_values) # Use full original values for drawdown context if possible
-                                                            # Or stick to current `portfolio_values` slice
-        drawdowns = (portfolio_values - rolling_max) / rolling_max # Max drawdown based on current slice
-        max_drawdown = np.min(drawdowns) if len(drawdowns) > 0 and np.any(rolling_max > 0) else 0.0
+        rolling_max = np.maximum.accumulate(
+            portfolio_values
+        )  # Use full original values for drawdown context if possible
+        # Or stick to current `portfolio_values` slice
+        drawdowns = (
+            portfolio_values - rolling_max
+        ) / rolling_max  # Max drawdown based on current slice
+        max_drawdown = (
+            np.min(drawdowns) if len(drawdowns) > 0 and np.any(rolling_max > 0) else 0.0
+        )
 
-        calmar_ratio = annual_return / abs(max_drawdown) if abs(max_drawdown) > 1e-9 and pd.notna(annual_return) else np.nan
+        calmar_ratio = (
+            annual_return / abs(max_drawdown)
+            if abs(max_drawdown) > 1e-9 and pd.notna(annual_return)
+            else np.nan
+        )
 
         negative_returns = daily_returns[daily_returns < daily_risk_free_rate]
         if len(negative_returns) > 0:
             downside_std_dev = np.std(negative_returns)
-            sortino_ratio = np.mean(excess_returns) / downside_std_dev * np.sqrt(252) if downside_std_dev > 1e-9 else np.nan
+            sortino_ratio = (
+                np.mean(excess_returns) / downside_std_dev * np.sqrt(252)
+                if downside_std_dev > 1e-9
+                else np.nan
+            )
         else:
             mean_er = np.mean(excess_returns)
-            sortino_ratio = np.inf if mean_er > 1e-9 else (0 if abs(mean_er) < 1e-9 else np.nan)
+            sortino_ratio = (
+                np.inf if mean_er > 1e-9 else (0 if abs(mean_er) < 1e-9 else np.nan)
+            )
 
         threshold = daily_risk_free_rate
         gains = daily_returns[daily_returns > threshold] - threshold
@@ -240,7 +318,9 @@ class DRLAgent:
         sum_abs_losses = abs(np.sum(losses))
 
         if sum_abs_losses < 1e-9:
-            omega_ratio = np.inf if sum_gains > 1e-9 else (1 if abs(sum_gains) < 1e-9 else np.nan)
+            omega_ratio = (
+                np.inf if sum_gains > 1e-9 else (1 if abs(sum_gains) < 1e-9 else np.nan)
+            )
         else:
             omega_ratio = sum_gains / sum_abs_losses
 
@@ -254,12 +334,18 @@ class DRLAgent:
             percentile_95 = np.percentile(daily_returns, 95)
             var_95 = percentile_5
             if abs(percentile_5) < 1e-9:
-                tail_ratio = np.inf if percentile_95 > 1e-9 else (1 if abs(percentile_95) < 1e-9 else np.nan)
+                tail_ratio = (
+                    np.inf
+                    if percentile_95 > 1e-9
+                    else (1 if abs(percentile_95) < 1e-9 else np.nan)
+                )
             else:
                 tail_ratio = percentile_95 / abs(percentile_5)
 
         portfolio_turnover = np.nan
-        stability = 1 / (1 + annual_volatility) if pd.notna(annual_volatility) else np.nan
+        stability = (
+            1 / (1 + annual_volatility) if pd.notna(annual_volatility) else np.nan
+        )
 
         return {
             "Annual return": annual_return,
