@@ -23,6 +23,7 @@ class DRLAgent:
         clip_range: float = 0.25,
         seed: int = 0,
         policy_kwargs: Optional[Dict[str, Any]] = None,
+        tensorboard_log: str = "./tensorboard_logs/",
     ):
         """
         Initializes the DRLAgent.
@@ -135,10 +136,11 @@ class DRLAgent:
             clip_range=clip_range,
             policy_kwargs=policy_kwargs,
             seed=seed,
+            tensorboard_log=tensorboard_log,
         )
         self.training_metrics = None
 
-    def train(self, total_timesteps: int = 100_000, tb_experiment_name: str = "ppo", tensorboard_log_path: str = "./tensorboard_logs/"):
+    def train(self, total_timesteps: int = 100_000, tb_experiment_name: str = "ppo"):
         """
         Trains the PPO model.
 
@@ -157,10 +159,12 @@ class DRLAgent:
             Default is "./tensorboard_logs/".
         """
         self.model.learn(
-            total_timesteps=total_timesteps, progress_bar=True, tb_log_name=tb_experiment_name, tensorboard_log=tensorboard_log_path
+            total_timesteps=total_timesteps, 
+            progress_bar=True, 
+            tb_log_name=tb_experiment_name
         )
         print(f"\nTraining complete. Trained for {total_timesteps} timesteps.")
-        print(f"TensorBoard logs for experiment '{tb_experiment_name}' saved in directory: {tensorboard_log_path}")
+        print(f"TensorBoard logs for experiment '{tb_experiment_name}' saved in directory: {self.model.tensorboard_log}")
 
     def predict(self, obs: np.ndarray, deterministic: bool = True):
         """
