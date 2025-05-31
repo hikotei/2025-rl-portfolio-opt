@@ -83,12 +83,12 @@ class DRLAgent:
         )
         self.training_metrics = None
 
-    def train(self, total_timesteps: int = 100_000, tb_log_name: str = "ppo"):
+    def train(self, total_timesteps: int = 100_000, tb_experiment_name: str = "ppo", tensorboard_log_path: str = "./tensorboard_logs/"):
         self.model.learn(
-            total_timesteps=total_timesteps, progress_bar=True, tb_log_name=tb_log_name
+            total_timesteps=total_timesteps, progress_bar=True, tb_log_name=tb_experiment_name, tensorboard_log=tensorboard_log_path
         )
         print(f"\nTraining complete. Trained for {total_timesteps} timesteps.")
-        print(f"TensorBoard logs saved to directory: {tb_log_name}")
+        print(f"TensorBoard logs for experiment '{tb_experiment_name}' saved in directory: {tensorboard_log_path}")
 
     def predict(self, obs: np.ndarray, deterministic: bool = True):
         action, _ = self.model.predict(obs, deterministic=deterministic)
