@@ -24,6 +24,61 @@ class DRLAgent:
         seed: int = 0,
         policy_kwargs: Optional[Dict[str, Any]] = None,
     ):
+        """
+        Initializes the DRLAgent.
+
+        This constructor sets up the reinforcement learning environment and initializes
+        the PPO (Proximal Policy Optimization) model with its specified configuration.
+
+        Parameters:
+        ----------
+        env : object
+            The environment instance. It should have attributes like `returns_df`,
+            `prices_df`, `vol_df`, `window_size`, `transaction_cost`,
+            `initial_balance`, and `reward_scaling`.
+        n_envs : int, optional
+            The number of parallel environments to use for training. Default is 1.
+        model_name : str, optional
+            The name of the DRL model to use. Currently, only 'ppo' is supported.
+            Default is "ppo".
+        policy : str, optional
+            The policy network type. For PPO, common choices are "MlpPolicy" for
+            multi-layer perceptron policies. Default is "MlpPolicy".
+        n_steps : int, optional
+            The number of steps to run for each environment per update. This is a PPO
+            hyperparameter. Default is 2048.
+        batch_size : int, optional
+            The mini-batch size for PPO updates. Default is 64.
+        n_epochs : int, optional
+            The number of epochs to train the PPO model on the collected data per
+            update. Default is 10.
+        learning_rate : Union[float, Callable[[float], float]], optional
+            The learning rate for the PPO optimizer. Can be a float or a schedule
+            function. Default is 0.0003.
+        gamma : float, optional
+            The discount factor for future rewards. Default is 0.99.
+        gae_lambda : float, optional
+            Factor for trade-off of bias vs variance for Generalized Advantage Estimator
+            (GAE). Default is 0.95.
+        clip_range : float, optional
+            The clipping parameter for PPO, defining the range within which the policy
+            ratio is clipped. Default is 0.25.
+        seed : int, optional
+            Random seed for reproducibility. Default is 0.
+        policy_kwargs : Optional[Dict[str, Any]], optional
+            Additional keyword arguments to pass to the policy network constructor.
+            If None, a default configuration (Tanh activation, [64, 64] net arch,
+            log_std_init=-1.0) is used. Default is None.
+
+        Initializes:
+        ------------
+        -   `self.original_env_class`: Stores the class of the provided environment.
+        -   `self.original_env_kwargs`: Stores the parameters of the original environment.
+        -   `self.env`: A vectorized environment (SubprocVecEnv) for parallel training.
+        -   `self.model`: The PPO model instance from stable-baselines3, configured
+            with the specified hyperparameters.
+        -   `self.training_metrics`: Initialized to None, will store training metrics later.
+        """
         self.original_env_class = type(env)
         env_params = {
             "returns_df": env.returns_df,
@@ -84,6 +139,23 @@ class DRLAgent:
         self.training_metrics = None
 
     def train(self, total_timesteps: int = 100_000, tb_experiment_name: str = "ppo", tensorboard_log_path: str = "./tensorboard_logs/"):
+        """
+        Trains the PPO model.
+
+        This method initiates the training process for the PPO model using the
+        specified number of timesteps. It also handles TensorBoard logging for
+        monitoring training progress.
+
+        Parameters:
+        ----------
+        total_timesteps : int, optional
+            The total number of samples (env steps) to train on. Default is 100,000.
+        tb_experiment_name : str, optional
+            The name of the experiment for TensorBoard logging. Default is "ppo".
+        tensorboard_log_path : str, optional
+            The path to the directory where TensorBoard logs will be saved.
+            Default is "./tensorboard_logs/".
+        """
         self.model.learn(
             total_timesteps=total_timesteps, progress_bar=True, tb_log_name=tb_experiment_name, tensorboard_log=tensorboard_log_path
         )
@@ -91,21 +163,124 @@ class DRLAgent:
         print(f"TensorBoard logs for experiment '{tb_experiment_name}' saved in directory: {tensorboard_log_path}")
 
     def predict(self, obs: np.ndarray, deterministic: bool = True):
+        """
+        Predicts actions based on an observation.
+
+        This method uses the trained PPO model to predict the next action(s)
+        given the current observation(s) from the environment.
+
+        Parameters:
+        ----------
+        obs : np.ndarray
+            The observation from the environment. This should be a NumPy array
+            compatible with the observation space of the environment used for
+            training.
+        deterministic : bool, optional
+            Whether to use deterministic or stochastic actions. If True, the model
+            will output the action with the highest probability. If False, the
+            action is sampled from the policy distribution. Default is True.
+
+        Returns:
+        -------
+        np.ndarray
+            The predicted action(s).
+        """
         action, _ = self.model.predict(obs, deterministic=deterministic)
         return action
 
     def save(self, path: str):
+        """
+        Saves the trained PPO model.
+
+        This method saves the current state of the PPO model to a file at the
+        specified path. This allows for later reloading and reuse of the trained
+        model.
+
+        Parameters:
+        ----------
+        path : str
+            The file path where the model should be saved. Typically, this is a
+            `.zip` file for stable-baselines3 models.
+        """
         self.model.save(path)
 
     def load(self, path: str, env=None):
+        """
+        Loads a pre-trained PPO model.
+
+        This method loads a PPO model from a file specified by the path.
+        It allows for setting a new environment for the loaded model or
+        continuing with the agent's current environment.
+
+        Parameters:
+        ----------
+        path : str
+            The file path from which the model should be loaded. Typically, this
+            is a `.zip` file saved by stable-baselines3.
+        env : object, optional
+            The environment to associate with the loaded model. If None, the
+            agent's current environment (`self.env`) is used. This is useful
+            if you want to load a model and use it with a different environment
+            (e.g., an evaluation environment). Default is None.
+        """
         target_env = env if env is not None else self.env
         self.model = PPO.load(path, env=target_env)
 
     def load_from_file(self, path: str, env=None):
+        """
+        Loads a model from a file and prints a confirmation message.
+
+        This method is a convenience wrapper around the `load` method. It calls
+        `self.load(path, env=env)` and then prints a message indicating that
+        the model has been loaded from the specified path.
+
+        Parameters:
+        ----------
+        path : str
+            The file path from which the model should be loaded.
+        env : object, optional
+            The environment to associate with the loaded model. If None, the
+            agent's current environment is used. Default is None.
+        """
         self.load(path, env=env)
         print(f"Model loaded from {path}")
 
     def evaluate(self, eval_env, n_eval_episodes: int = 1, deterministic: bool = True):
+        """
+        Evaluates the agent's performance on a given environment.
+
+        This method runs the agent for a specified number of episodes on the
+        evaluation environment (`eval_env`). It collects rewards and portfolio
+        values to calculate various performance metrics.
+
+        Parameters:
+        ----------
+        eval_env : object
+            The environment on which to evaluate the agent. This should be
+            compatible with the agent's model (i.e., have the same observation
+            and action spaces).
+        n_eval_episodes : int, optional
+            The number of episodes to run for evaluation. Default is 1.
+        deterministic : bool, optional
+            Whether to use deterministic actions during evaluation. If True, the
+            model selects the action with the highest probability. If False,
+            actions are sampled. Default is True.
+
+        Returns:
+        -------
+        Dict[str, Any | float]
+            A dictionary containing various evaluation metrics. This includes:
+            -   `mean_reward`: Average reward per episode.
+            -   `std_reward`: Standard deviation of rewards per episode.
+            -   `n_eval_episodes`: Number of evaluation episodes.
+            -   `final_portfolio_value_first_episode`: Portfolio value at the end
+                of the first evaluation episode.
+            -   Other metrics calculated by `self.calc_metrics()` based on the
+                portfolio values of the first episode (e.g., Sharpe ratio,
+                Max drawdown). If `n_eval_episodes` is 0, or if portfolio
+                values cannot be extracted, these metrics might be NaN or default
+                values.
+        """
         all_episode_rewards = []
         all_episode_portfolio_values = []
 
@@ -175,6 +350,32 @@ class DRLAgent:
         portfolio_values: Union[List[float], np.ndarray, pd.Series],
         risk_free_rate: float = 0.02,
     ) -> Dict[str, Any | float]:
+        """
+        Calculates various financial performance metrics from a series of portfolio values.
+
+        This method takes a time series of portfolio values and computes several
+        standard financial metrics, such as annual return, volatility, Sharpe ratio,
+        Sortino ratio, maximum drawdown, etc.
+
+        Parameters:
+        ----------
+        portfolio_values : Union[List[float], np.ndarray, pd.Series]
+            A list, NumPy array, or Pandas Series representing the portfolio value
+            at each time step. Must contain at least two data points for meaningful
+            calculations.
+        risk_free_rate : float, optional
+            The annualized risk-free rate used for calculating metrics like the
+            Sharpe ratio and Sortino ratio. Default is 0.02 (2%).
+
+        Returns:
+        -------
+        Dict[str, Any | float]
+            A dictionary where keys are metric names (e.g., "Annual return",
+            "Sharpe ratio") and values are the calculated metric values.
+            If input `portfolio_values` is invalid (e.g., too short, contains NaN/Inf,
+            all zeros), it returns a dictionary with default NaN values for metrics
+            and an "error" key explaining the issue.
+        """
         default_metrics = {
             "Annual return": np.nan,
             "Cumulative returns": np.nan,
