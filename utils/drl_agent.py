@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
 from stable_baselines3 import PPO
-from stable_baselines3.common.vec_env import SubprocVecEnv, VecEnv
+from stable_baselines3.common.vec_env import SubprocVecEnv
 from stable_baselines3.common.utils import set_random_seed
 
 # from stable_baselines3.common.callbacks import BaseCallback
@@ -205,7 +205,6 @@ class DRLAgent:
             Dictionary containing evaluation metrics
         """
         all_portfolio_values = []
-        all_weights_history = [] # Initialize history for all episodes
         rewards = []
 
         for episode in range(n_episodes):
@@ -213,78 +212,27 @@ class DRLAgent:
             done = False
             total_reward = 0.0
             episode_portfolio_values = []
-            episode_weights_history = [] # Initialize history for current episode
-
-            # Add initial weights at the beginning of the episode
-            if isinstance(env, VecEnv):
-                initial_weights = env.env_method('get_current_weights')[0]
-            else:
-                initial_weights = env.get_current_weights()
-            episode_weights_history.append(initial_weights)
 
             while not done:
                 action = self.predict(obs)
-                obs, reward, terminated, truncated, info_step = env.step(action) # Renamed info to info_step
+                obs, reward, terminated, truncated, info = env.step(action)
                 total_reward += reward
-                done = terminated or truncated # Assuming terminated and truncated are booleans or arrays of booleans
+                done = terminated or truncated
 
-                # Handle info_step for VecEnv
-                current_info = info_step[0] if isinstance(env, VecEnv) else info_step
-
-                if "portfolio_value" in current_info:
-                    episode_portfolio_values.append(current_info["portfolio_value"])
-
-                # Get current weights
-                if isinstance(env, VecEnv):
-                    current_weights = env.env_method('get_current_weights')[0]
-                else:
-                    current_weights = env.get_current_weights()
-                episode_weights_history.append(current_weights)
+                if "portfolio_value" in info:
+                    episode_portfolio_values.append(info["portfolio_value"])
 
             rewards.append(total_reward)
-            # For VecEnv, all_portfolio_values might need specific handling if episodes end at different times.
-            # Here, assuming episodes run full length or portfolio_values are handled correctly by the env.
-            # If env is VecEnv, episode_portfolio_values will actually be from the first sub-env.
             all_portfolio_values.extend(episode_portfolio_values)
-            if n_episodes > 0: # This check is technically not needed due to loop condition
-                all_weights_history.append(episode_weights_history)
 
-        # Determine weights_history for calc_metrics
-        eval_weights_history = None
-        if all_weights_history:
-            eval_weights_history = all_weights_history[0] # Use weights from the first episode
-
-        # Calculate evaluation metrics using the environment's method
-        if isinstance(env, VecEnv):
-            # Assuming all sub-environments in VecEnv have similar portfolio_values patterns for evaluation
-            # For simplicity, we use portfolio_values from the first sub-env if it's a VecEnv.
-            # A more robust approach might involve averaging metrics across sub-envs or handling them individually.
-            # However, standard evaluation usually runs on a single env instance.
-            # If all_portfolio_values were collected from VecEnv (e.g. info[0]), it's already from the first env.
-            metrics_env = env.envs[0] # Get the actual environment instance for calc_metrics
-            eval_metrics = metrics_env.calc_metrics(
-                portfolio_values=np.array(all_portfolio_values) if all_portfolio_values else np.array([env.envs[0].initial_balance]),
-                weights_history=eval_weights_history
-            )
-        else:
-            eval_metrics = env.calc_metrics(
-                portfolio_values=np.array(all_portfolio_values) if all_portfolio_values else np.array([env.initial_balance]),
-                weights_history=eval_weights_history
-            )
-
-        # Ensure rewards is not empty before calculating mean
-        if rewards:
-            eval_metrics["Average Reward"] = np.mean(rewards)
-        else:
-            eval_metrics["Average Reward"] = np.nan
-
+        # Calculate evaluation metrics using agent's method
+        eval_metrics = self.calc_metrics(all_portfolio_values)
+        eval_metrics["Average Reward"] = np.mean(rewards)
 
         # Print evaluation summary
-        final_pv = all_portfolio_values[-1] if all_portfolio_values else (env.envs[0].initial_balance if isinstance(env, VecEnv) else env.initial_balance)
         print("\nEvaluation Summary:")
-        print(f"Final Portfolio Value: ${final_pv:,.2f}")
-        avg_reward_val = np.mean(rewards) if rewards else np.nan
-        print(f"Average Reward: {avg_reward_val:.4f}")
+        print(f"Final Portfolio Value: ${all_portfolio_values[-1]:,.2f}")
+        print(f"Average Reward: {np.mean(rewards):.4f}")
         print("\nPerformance Metrics:")
         for metric, value in eval_metrics.items():
             if isinstance(value, float):
