@@ -1,40 +1,36 @@
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
-from scipy.optimize import minimize
 
-from sklearn.covariance import LedoitWolf
+from pypfopt import objective_functions
 from pypfopt.efficient_frontier import EfficientFrontier
-import pypfopt.objective_functions as objective_functions
+
+from scipy.optimize import minimize
+from sklearn.covariance import LedoitWolf
+
+from utils.portfolio import Portfolio
 
 
-class MVOOptimizer:
+class MVOPortfolio:
     """
-    Mean-Variance Optimizer using PyPortfolioOpt and Ledoit-Wolf shrinkage.
-    Optimizes portfolio weights by maximizing the Sharpe ratio.
+    Mean-Variance Optimization (MVO) based portfolio strategy.
+    Implements a portfolio management strategy that uses MVO to optimize asset weights
+    by maximizing the Sharpe ratio, with Ledoit-Wolf shrinkage for covariance estimation.
     """
 
-    def __init__(self, tickers, lookback=60, risk_free_rate=0.0):
+    def __init__(self, tickers, lookback=60, risk_free_rate=0.0, initial_cash=100_000):
         """
         Args:
             tickers (list): List of asset tickers.
             lookback (int): Number of days to use for historical estimation.
             risk_free_rate (float): Annual risk-free rate (default: 0.0).
+            initial_cash (float): Initial cash amount for the portfolio (default: 100_000).
         """
         self.tickers = tickers
         self.lookback = lookback
         self.risk_free_rate = risk_free_rate
-        self.daily_risk_free = (1 + risk_free_rate) ** (
-            1 / 252
-        ) - 1  # Convert annual to daily
-        self.reset()
-
-    def reset(self):
-        """Reset the optimizer state."""
-        self.cash = 0
-        self.shares = {t: 0 for t in self.tickers}
-        self.portfolio_value = 0
-        self.history = []
+        self.daily_risk_free = (1 + risk_free_rate) ** (1 / 252) - 1
+        self.portfolio = Portfolio(tickers, initial_cash)
 
     @staticmethod
     def negative_sharpe_ratio(weights, mean_returns, cov_matrix, risk_free_rate):
@@ -119,23 +115,23 @@ class MVOOptimizer:
 
             return dict(zip(return_window.columns, result["x"]))
 
-    def backtest(self, df_ret, df_prices, start_date, end_date, initial_cash=100_000, method="pypfopt"):
+    def backtest(
+        self,
+        df_ret,
+        df_prices,
+        start_date,
+        end_date,
+        method="pypfopt",
+    ):
         """
-        Simulates portfolio rebalancing over time using mean-variance optimization.
-
-        - start with 100_000 cash
-        - take lookback window of returns to compute weights using MVO
-        - lookback window = today and lookback days before
-        - use prices of today to rebalance weights to ensure integer values for shares
-        - at the start of the next day, update portfolio value using new prices
-        - which reflects the change in prices of the assets
+        Simulates portfolio over time using mean-variance optimization.
 
         Args:
             df_ret (pd.DataFrame): Daily returns of assets.
             df_prices (pd.DataFrame): Daily prices of assets.
             start_date (str or pd.Timestamp): Backtest start date.
             end_date (str or pd.Timestamp): Backtest end date.
-            initial_cash (float): Starting capital.
+            method (str): Optimization method to use ("pypfopt" or "scipy").
 
         Returns:
             pd.DataFrame: Portfolio history including weights, shares, and cash allocations.
@@ -146,9 +142,7 @@ class MVOOptimizer:
             return pd.DataFrame()
 
         date_range = pd.bdate_range(start=start_date, end=end_date)
-        self.reset()
-        self.cash = initial_cash
-        self.portfolio_value = initial_cash
+        self.portfolio.reset()
 
         for eval_date in tqdm(date_range, desc="Running backtest"):
             if eval_date not in df_ret.index or eval_date not in df_prices.index:
@@ -168,44 +162,12 @@ class MVOOptimizer:
             return_window = return_window[valid_tickers]
             prices_today = prices_today[valid_tickers]
 
-            # Compute current portfolio value
-            self.portfolio_value = (
-                sum(self.shares.get(t, 0) * prices_today[t] for t in valid_tickers)
-                + self.cash
-            )
-            # self.shares.get(t, 0) adresses the problem that when we have a new ticker,
-            # eg XLC is introduced in 2019, we need to initialize shares[XLC] to 0
-
             # Get new weights
-            weights = self.get_weights(return_window)
-            # Reallocate capital using computed weights
-            asset_cash = {t: weights[t] * self.portfolio_value for t in valid_tickers}
-            # Rebalance shares to ensure integer values
-            self.shares = {
-                t: np.floor(asset_cash[t] / prices_today[t])
-                if prices_today[t] != 0
-                else 0
-                for t in valid_tickers
-            }
-            # Allocate the rest of portfolio value to cash
-            invested = sum(
-                self.shares.get(t, 0) * prices_today[t] for t in valid_tickers
-            )
-            self.cash = self.portfolio_value - invested
+            weights = self.get_weights(return_window, method=method)
+            if weights is None:
+                continue
 
-            # Save history
-            record = {
-                "date": eval_date,
-                "portfolio_value": self.portfolio_value,
-                "cash": self.cash,
-                "lookback": self.lookback,
-                "w_c": self.cash / self.portfolio_value,
-            }
-            for t in valid_tickers:
-                record[f"w_{t}"] = weights[t]
-            for t in self.tickers:
-                record[f"shares_{t}"] = self.shares.get(t, 0)
+            # Rebalance portfolio
+            self.portfolio.update_rebalance(prices_today, weights, date=eval_date)
 
-            self.history.append(record)
-
-        return pd.DataFrame(self.history).set_index("date")
+        return self.portfolio

@@ -5,6 +5,7 @@ import gymnasium as gym
 from gymnasium import spaces
 
 from typing import Dict, Tuple, Optional, Union, List
+from utils.portfolio import Portfolio
 
 
 class PortfolioEnv(gym.Env):
@@ -71,6 +72,9 @@ class PortfolioEnv(gym.Env):
         # Get number of assets (including those with NaNs)
         self.n_assets = len(returns_df.columns)
 
+        # UserWarning: We recommend you to use a symmetric and normalized Box action space (range=[-1, 1]) 
+        # cf. https://stable-baselines3.readthedocs.io/en/master/guide/rl_tips.html
+
         # Define action space (portfolio weights)
         self.action_space = spaces.Box(
             low=0.0, high=1.0, shape=(self.n_assets,), dtype=np.float32
@@ -78,6 +82,8 @@ class PortfolioEnv(gym.Env):
 
         # Define observation space as outlined in paper
         # TODO: think about flattening the observation matrix ...
+        # UserWarning: Your observation  has an unconventional shape (neither an image, nor a 1D vector). 
+        # We recommend you to flatten the observation to have only a 1D vector or use a custom policy to properly process the data.
         self.observation_space = spaces.Box(
             low=-np.inf,
             high=np.inf,
@@ -85,12 +91,8 @@ class PortfolioEnv(gym.Env):
             dtype=np.float32,
         )
 
-        # Initialize weights and cash weight
-        self.weights = np.zeros(self.n_assets, dtype=np.float32)
-        self.w_c = 1.0
-
-        # Initialize state
-        self.reset()
+        # Initialize portfolio
+        self.portfolio = Portfolio(returns_df.columns, initial_balance)
 
     def reset(
         self,
@@ -109,10 +111,7 @@ class PortfolioEnv(gym.Env):
         """
         super().reset(seed=seed)
         self.current_step = self.window_size
-        self.portfolio_value = self.initial_balance
-        self.weights = np.zeros(self.n_assets, dtype=np.float32)
-        self.w_c = 1.0
-        self.previous_weights = self.weights.copy()
+        self.portfolio.reset()
         self.A_t = 0.0
         self.B_t = 0.0
         self.prev_A_t = 0.0
@@ -135,11 +134,11 @@ class PortfolioEnv(gym.Env):
         if len(action.shape) == 2:
             # Get the action for this specific environment
             action = action[0]  # This environment's action
-        
+
         # Convert single float to array if needed
         if isinstance(action, (np.float32, float)):
             action = np.array([action] * self.n_assets, dtype=np.float32)
-        
+
         # Check for NaN in action
         if np.isnan(action).any():
             raise ValueError("NaN values in action")
@@ -152,46 +151,18 @@ class PortfolioEnv(gym.Env):
         mask = self.prices_df.columns.isin(self.nan_cols)
         weights[mask] = 0
 
-        # Get prices for rebalancing (t-1) and current prices (t)
-        prev_prices = self.prices_df.iloc[self.current_step - 1].fillna(0)
+        # Get current prices
         current_prices = self.prices_df.iloc[self.current_step].fillna(0)
 
-        # Calculate asset cash allocations and shares using t-1 prices
-        asset_cash = {
-            t: weights[i] * self.portfolio_value
-            for i, t in enumerate(self.prices_df.columns)
-        }
-        shares = {
-            t: np.floor(asset_cash[t] / prev_prices[t])
-            if prev_prices[t] != 0 and not np.isnan(prev_prices[t])
-            else 0
-            for t in self.prices_df.columns
-        }
-
-        # Update weights and cash weight for next round using previous (t-1) prices
-        self.weights = np.array(
-            [
-                shares[t] * prev_prices[t] / self.portfolio_value
-                if self.portfolio_value > 0
-                else 0.0
-                for t in self.prices_df.columns
-            ]
+        # Rebalance portfolio with new weights
+        self.portfolio.update_rebalance(
+            current_prices,
+            dict(zip(self.prices_df.columns, weights)),
+            date=self.prices_df.index[self.current_step],
         )
-        self.w_c = 1 - np.sum(self.weights)
-
-        # Save old portfolio value
-        old_portfolio_value = self.portfolio_value
-
-        # Calculate new portfolio value
-        self.portfolio_value = sum(
-            shares[t] * current_prices[t] for t in self.prices_df.columns
-        )
-        self.portfolio_value += self.w_c * self.initial_balance
 
         # Calculate portfolio return
-        portfolio_return = (
-            self.portfolio_value - old_portfolio_value
-        ) / old_portfolio_value
+        portfolio_return = self.portfolio.get_return()
 
         # Check for NaN in portfolio return
         if np.isnan(portfolio_return):
@@ -221,11 +192,11 @@ class PortfolioEnv(gym.Env):
         observation = self._get_observation()
 
         info = {
-            "portfolio_value": self.portfolio_value,
+            "portfolio_value": self.portfolio.current_balance,
             "portfolio_return": portfolio_return,
-            "shares": shares,
-            "weights": self.weights,
-            "w_c": self.w_c,
+            "shares": self.portfolio.asset_holdings_shares,
+            "weights": self.portfolio.weights,
+            "w_c": self.portfolio.w_c,
         }
         return observation, reward, terminated, truncated, info
 
@@ -241,8 +212,10 @@ class PortfolioEnv(gym.Env):
         ].values
         returns_window = np.nan_to_num(returns_window, nan=0.0)
 
-        # Use self.weights and self.w_c for the first column
-        weights_full = np.append(self.weights, self.w_c)
+        # Get current weights from portfolio
+        weights_full = np.append(
+            list(self.portfolio.weights.values()), self.portfolio.w_c
+        )
 
         # Prepare observation matrix: (n_assets+1) x (window_size + 4)
         n_assets = self.n_assets
@@ -317,21 +290,14 @@ class PortfolioEnv(gym.Env):
 
     def render(self, mode="human"):
         """
-        Render the current state of the environment (not implemented yet).
-
-        This would be like showing a trading dashboard with:
-        - Current portfolio value
-        - Asset allocations
-        - Performance charts
+        Render the current state of the environment.
+        this could be used to show a trading dashboard ...
         """
-        pass  # TODO: Implement visualization
+        pass
 
     def close(self):
         """
         Clean up environment resources.
-
-        This is like closing your trading platform and cleaning up any open connections
-        or files. It's called when you're done using the environment.
         """
         pass
 
