@@ -1,5 +1,8 @@
 import numpy as np
 import pandas as pd
+from tqdm import tqdm
+from scipy.optimize import minimize
+
 from sklearn.covariance import LedoitWolf
 from pypfopt.efficient_frontier import EfficientFrontier
 import pypfopt.objective_functions as objective_functions
@@ -11,14 +14,19 @@ class MVOOptimizer:
     Optimizes portfolio weights by maximizing the Sharpe ratio.
     """
 
-    def __init__(self, tickers, lookback=60):
+    def __init__(self, tickers, lookback=60, risk_free_rate=0.0):
         """
         Args:
             tickers (list): List of asset tickers.
             lookback (int): Number of days to use for historical estimation.
+            risk_free_rate (float): Annual risk-free rate (default: 0.0).
         """
         self.tickers = tickers
         self.lookback = lookback
+        self.risk_free_rate = risk_free_rate
+        self.daily_risk_free = (1 + risk_free_rate) ** (
+            1 / 252
+        ) - 1  # Convert annual to daily
         self.reset()
 
     def reset(self):
@@ -28,7 +36,19 @@ class MVOOptimizer:
         self.portfolio_value = 0
         self.history = []
 
-    def get_weights(self, return_window):
+    @staticmethod
+    def negative_sharpe_ratio(weights, mean_returns, cov_matrix, risk_free_rate):
+        """
+        Calculate the negative Sharpe ratio (to be minimized).
+        Sharpe Ratio = (Expected Return - Risk Free Rate) / Portfolio Standard Deviation
+        """
+        weights = np.array(weights)
+        portfolio_return = np.sum(mean_returns * weights)
+        portfolio_std_dev = np.sqrt(weights.T @ cov_matrix @ weights)
+        sharpe = (portfolio_return - risk_free_rate) / portfolio_std_dev
+        return -sharpe
+
+    def get_weights(self, return_window, method="pypfopt"):
         """
         Computes the optimal portfolio weights for the given return window.
 
@@ -39,37 +59,67 @@ class MVOOptimizer:
             dict: Dictionary of {ticker: weight} or None if optimization fails.
         """
         if return_window.isnull().any().any():
-            print(f"Warning: NaN values found in return window from {return_window.index.min()} to {return_window.index.max()}")
+            print(
+                f"Warning: NaN values found in return window from {return_window.index.min()} to {return_window.index.max()}"
+            )
             return None
 
-        try:
-            lw = LedoitWolf()
-            lw.fit(return_window)
-            cov_matrix = lw.covariance_
+        lw = LedoitWolf()
+        lw.fit(return_window)
+        cov_matrix = lw.covariance_
 
-            # Ensure PSD
-            eigvals, eigvecs = np.linalg.eigh(cov_matrix)
-            eigvals[eigvals < 0] = 0
-            cov_psd = eigvecs @ np.diag(eigvals) @ eigvecs.T
+        # Ensure PSD
+        eigvals, eigvecs = np.linalg.eigh(cov_matrix)
+        eigvals[eigvals < 0] = 0
+        cov_psd = eigvecs @ np.diag(eigvals) @ eigvecs.T
+        # ensure symmetry
+        cov_psd = (cov_psd + cov_psd.T) / 2
 
-            mu = return_window.mean()
-            if (mu < 0).all():
-                # print(f"All returns are negative for {return_window.index.min()} to {return_window.index.max()}")
-                return {t: 0 for t in return_window.columns}
+        mu = return_window.mean()
+        if (mu < 0).all():
+            # print(f"All returns are negative for {return_window.index.min()} to {return_window.index.max()}")
+            return {t: 0 for t in return_window.columns}
 
+        if method == "pypfopt":
             ef = EfficientFrontier(mu, cov_psd)
             weights_array = ef.nonconvex_objective(
                 objective_functions.sharpe_ratio,
                 objective_args=(ef.expected_returns, ef.cov_matrix),
                 weights_sum_to_one=True,
             )
-
             return dict(weights_array)
-        except Exception as e:
-            print(f"Error in optimization: {str(e)}")
-            return None
 
-    def backtest(self, df_ret, df_prices, start_date, end_date, initial_cash=100_000):
+        if method == "scipy":
+            n_assets = len(return_window.columns)
+
+            # Initial guess: equal weights
+            initial_weights = np.ones(n_assets) / n_assets
+
+            # Constraints
+            constraints = {
+                "type": "eq",
+                "fun": lambda x: np.sum(x) - 1,
+            }  # weights sum to 1
+            bounds = tuple((0, 1) for _ in range(n_assets))  # 0 <= weight <= 1
+
+            # Optimize
+            result = minimize(
+                self.negative_sharpe_ratio,
+                initial_weights,
+                args=(mu, cov_matrix, self.daily_risk_free),
+                method="SLSQP",
+                bounds=bounds,
+                constraints=constraints,
+                options={"maxiter": 1000},
+            )
+
+            if not result["success"]:
+                print(f"Warning: Optimization failed: {result['message']}")
+                return {t: 0 for t in return_window.columns}
+
+            return dict(zip(return_window.columns, result["x"]))
+
+    def backtest(self, df_ret, df_prices, start_date, end_date, initial_cash=100_000, method="pypfopt"):
         """
         Simulates portfolio rebalancing over time using mean-variance optimization.
 
@@ -100,7 +150,7 @@ class MVOOptimizer:
         self.cash = initial_cash
         self.portfolio_value = initial_cash
 
-        for eval_date in date_range:
+        for eval_date in tqdm(date_range, desc="Running backtest"):
             if eval_date not in df_ret.index or eval_date not in df_prices.index:
                 # print(f"Date {eval_date} not in returns or prices")
                 continue
@@ -120,7 +170,8 @@ class MVOOptimizer:
 
             # Compute current portfolio value
             self.portfolio_value = (
-                sum(self.shares.get(t, 0) * prices_today[t] for t in valid_tickers) + self.cash
+                sum(self.shares.get(t, 0) * prices_today[t] for t in valid_tickers)
+                + self.cash
             )
             # self.shares.get(t, 0) adresses the problem that when we have a new ticker,
             # eg XLC is introduced in 2019, we need to initialize shares[XLC] to 0
@@ -131,11 +182,15 @@ class MVOOptimizer:
             asset_cash = {t: weights[t] * self.portfolio_value for t in valid_tickers}
             # Rebalance shares to ensure integer values
             self.shares = {
-                t: np.floor(asset_cash[t] / prices_today[t]) if prices_today[t] != 0 else 0
+                t: np.floor(asset_cash[t] / prices_today[t])
+                if prices_today[t] != 0
+                else 0
                 for t in valid_tickers
             }
             # Allocate the rest of portfolio value to cash
-            invested = sum(self.shares.get(t, 0) * prices_today[t] for t in valid_tickers)
+            invested = sum(
+                self.shares.get(t, 0) * prices_today[t] for t in valid_tickers
+            )
             self.cash = self.portfolio_value - invested
 
             # Save history

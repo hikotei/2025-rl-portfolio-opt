@@ -245,6 +245,7 @@ class DRLAgent:
     def calc_metrics(
         self,
         portfolio_values: Union[List[float], np.ndarray, pd.Series],
+        weights_history: Optional[List[Dict[str, float]]] = None,
         risk_free_rate: float = 0.02,
     ) -> Dict[str, Any | float]:
         """
@@ -252,6 +253,7 @@ class DRLAgent:
 
         Args:
             portfolio_values: Array of portfolio values over time
+            weights_history: List of dictionaries containing portfolio weights at each time step
             risk_free_rate: Annual risk-free rate (default: 2%)
 
         Returns:
