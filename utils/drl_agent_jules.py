@@ -23,7 +23,7 @@ class DRLAgent:
         clip_range: float = 0.25,
         seed: int = 0,
         policy_kwargs: Optional[Dict[str, Any]] = None,
-        tensorboard_log: str = "./tensorboard_logs/",
+        tensorboard_log: str = "./logs/",
     ):
         """
         Initializes the DRLAgent.
@@ -156,7 +156,7 @@ class DRLAgent:
             The name of the experiment for TensorBoard logging. Default is "ppo".
         tensorboard_log_path : str, optional
             The path to the directory where TensorBoard logs will be saved.
-            Default is "./tensorboard_logs/".
+            Default is "./logs/".
         """
         self.model.learn(
             total_timesteps=total_timesteps,

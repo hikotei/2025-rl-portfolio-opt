@@ -15,24 +15,19 @@ Inspired by the 2023 paper by Sood et al: [*"Deep Reinforcement Learning for Opt
 portfolio_opt/
 ├── __init__.py
 │
-├── models/
+├── utils/
 │   ├── mvo.py                  # MVOOptimizer class using Ledoit-Wolf + PyPortfolioOpt
 │   └── drl_agent.py            # DRLAgent wrapper for PPO from Stable-Baselines3
-│
-├── env/
 │   └── portfolio_env.py        # Custom Gym-like environment for DRL training & evaluation
-│
-├── backtest/
-│   └── backtester.py           # MVOBacktester class to simulate portfolio evolution
 │
 ├── data/                       # Place for prices.csv, returns.csv, vola.csv
 │
-├── train/
-│   └── train_drl.py            # Training loop for PPO agent using Stable-Baselines3
-│
-run_backtest.py                 # Example script using MVOOptimizer via the backtester
-get_data.py                     # Downloads Yahoo Finance data and saves returns/prices/vol
+├── notebooks/
 ```
+
+results folder is for plots etc
+models saves the model zip files
+logs for tensorboard log files
 
 ---
 
