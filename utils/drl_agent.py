@@ -249,15 +249,17 @@ class DRLAgent:
         risk_free_rate: float = 0.02,
     ) -> Dict[str, Any | float]:
         """
-        Calculate portfolio performance metrics.
-
+        Calculates a comprehensive set of portfolio performance metrics from a time series of portfolio values.
+        
         Args:
-            portfolio_values: Array of portfolio values over time
-            weights_history: List of dictionaries containing portfolio weights at each time step
-            risk_free_rate: Annual risk-free rate (default: 2%)
-
+            portfolio_values: Sequence of portfolio values over time.
+            weights_history: Optional list of dictionaries with portfolio weights at each time step.
+            risk_free_rate: Annual risk-free rate used in certain metrics (default: 2%).
+        
         Returns:
-            Dictionary containing various portfolio metrics
+            Dictionary containing annual return, cumulative returns, annual volatility, Sharpe ratio,
+            Calmar ratio, stability, maximum drawdown, Omega ratio, Sortino ratio, skewness, kurtosis,
+            tail ratio, daily value at risk (VaR), and portfolio turnover.
         """
         # Convert to numpy array if needed
         if isinstance(portfolio_values, (list, pd.Series)):

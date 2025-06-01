@@ -16,10 +16,12 @@ class MVOOptimizer:
 
     def __init__(self, tickers, lookback=60, risk_free_rate=0.0):
         """
+        Initializes the mean-variance optimizer with asset tickers, lookback window, and risk-free rate.
+        
         Args:
-            tickers (list): List of asset tickers.
-            lookback (int): Number of days to use for historical estimation.
-            risk_free_rate (float): Annual risk-free rate (default: 0.0).
+            tickers: List of asset tickers to include in the portfolio.
+            lookback: Number of days of historical returns to use for optimization.
+            risk_free_rate: Annualized risk-free rate used in Sharpe ratio calculations.
         """
         self.tickers = tickers
         self.lookback = lookback
@@ -30,7 +32,9 @@ class MVOOptimizer:
         self.reset()
 
     def reset(self):
-        """Reset the optimizer state."""
+        """
+        Resets the optimizer's internal state, clearing cash, shares, portfolio value, and history.
+        """
         self.cash = 0
         self.shares = {t: 0 for t in self.tickers}
         self.portfolio_value = 0
@@ -39,8 +43,18 @@ class MVOOptimizer:
     @staticmethod
     def negative_sharpe_ratio(weights, mean_returns, cov_matrix, risk_free_rate):
         """
-        Calculate the negative Sharpe ratio (to be minimized).
-        Sharpe Ratio = (Expected Return - Risk Free Rate) / Portfolio Standard Deviation
+        Calculates the negative Sharpe ratio for a given portfolio allocation.
+        
+        The negative Sharpe ratio is used as an objective function for optimization, where the Sharpe ratio is defined as the excess expected return over the risk-free rate divided by the portfolio's standard deviation.
+        
+        Args:
+            weights: Portfolio weights for each asset.
+            mean_returns: Expected returns for each asset.
+            cov_matrix: Covariance matrix of asset returns.
+            risk_free_rate: Risk-free rate used in Sharpe ratio calculation.
+        
+        Returns:
+            The negative Sharpe ratio for the given portfolio weights.
         """
         weights = np.array(weights)
         portfolio_return = np.sum(mean_returns * weights)
@@ -50,13 +64,20 @@ class MVOOptimizer:
 
     def get_weights(self, return_window, method="pypfopt"):
         """
-        Computes the optimal portfolio weights for the given return window.
-
+        Calculates optimal portfolio weights for a given window of historical returns using mean-variance optimization.
+        
+        If any returns are NaN, returns None. Uses Ledoit-Wolf shrinkage to estimate the covariance matrix and ensures it is positive semi-definite. If all mean returns are negative, assigns zero weights to all assets.
+        
+        Supports two optimization methods:
+        - "pypfopt": Uses PyPortfolioOpt's EfficientFrontier to maximize the Sharpe ratio.
+        - "scipy": Uses SciPy's SLSQP optimizer to minimize the negative Sharpe ratio, subject to weights summing to one and being between 0 and 1.
+        
         Args:
-            return_window (pd.DataFrame): Lookback window of returns [days x assets].
-
+            return_window (pd.DataFrame): Historical returns for the lookback period (rows: days, columns: assets).
+            method (str): Optimization method, either "pypfopt" or "scipy".
+        
         Returns:
-            dict: Dictionary of {ticker: weight} or None if optimization fails.
+            dict: Mapping of asset tickers to portfolio weights, or None if input contains NaNs or optimization fails.
         """
         if return_window.isnull().any().any():
             print(
@@ -121,24 +142,20 @@ class MVOOptimizer:
 
     def backtest(self, df_ret, df_prices, start_date, end_date, initial_cash=100_000, method="pypfopt"):
         """
-        Simulates portfolio rebalancing over time using mean-variance optimization.
-
-        - start with 100_000 cash
-        - take lookback window of returns to compute weights using MVO
-        - lookback window = today and lookback days before
-        - use prices of today to rebalance weights to ensure integer values for shares
-        - at the start of the next day, update portfolio value using new prices
-        - which reflects the change in prices of the assets
-
+        Runs a backtest simulating portfolio rebalancing using mean-variance optimization over a specified date range.
+        
+        At each business day, computes optimal portfolio weights based on a lookback window of historical returns, reallocates capital according to these weights using current prices, and tracks portfolio value, cash, and asset holdings over time.
+        
         Args:
-            df_ret (pd.DataFrame): Daily returns of assets.
-            df_prices (pd.DataFrame): Daily prices of assets.
-            start_date (str or pd.Timestamp): Backtest start date.
-            end_date (str or pd.Timestamp): Backtest end date.
-            initial_cash (float): Starting capital.
-
+            df_ret (pd.DataFrame): Daily returns for each asset.
+            df_prices (pd.DataFrame): Daily prices for each asset.
+            start_date (str or pd.Timestamp): Start date for the backtest.
+            end_date (str or pd.Timestamp): End date for the backtest.
+            initial_cash (float): Initial portfolio cash value.
+            method (str): Optimization method to use ("pypfopt" or "scipy").
+        
         Returns:
-            pd.DataFrame: Portfolio history including weights, shares, and cash allocations.
+            pd.DataFrame: Time series of portfolio history, including value, cash, weights, and shares held for each asset.
         """
         # Validate date range
         if start_date > end_date:
