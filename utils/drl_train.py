@@ -63,6 +63,7 @@ def dataload(
 
 
 def slice_data(
+    drl_config: DRLConfig,
     year_start: int,
     num_train_years: int,
     num_val_years: int,
@@ -76,28 +77,21 @@ def slice_data(
     Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame],
 ]:
     """
-    Slice data for a given window configuration.
-
-    Args:
-        year_start: Starting year for the window
-        num_train_years: Number of years for training
-        num_val_years: Number of years for validation
-        num_test_years: Number of years for testing
-        df_prices: Full price dataframe
-        df_ret: Full returns dataframe
-        vol_df: Full volatility dataframe
+    Slice data for a given window configuration with non-consecutive dates.
 
     Returns:
         Tuple of (train_data, val_data, test_data) where each is a tuple of (prices, returns, vol)
     """
+
+    window_size = drl_config.env_window_size
+
+    # Generate start and end dates
     train_start_date = pd.to_datetime(f"{year_start}-01-01")
     train_end_date = pd.to_datetime(f"{year_start + num_train_years - 1}-12-31")
-
     val_start_date = pd.to_datetime(f"{year_start + num_train_years}-01-01")
     val_end_date = pd.to_datetime(
         f"{year_start + num_train_years + num_val_years - 1}-12-31"
     )
-
     test_start_date = pd.to_datetime(
         f"{year_start + num_train_years + num_val_years}-01-01"
     )
@@ -109,25 +103,35 @@ def slice_data(
     print(f"  Val Period  : {val_start_date.date()} to {val_end_date.date()}")
     print(f"  Test Period : {test_start_date.date()} to {test_end_date.date()}")
 
+    def get_effective_start(df, start_date, window_size):
+        """Find the true starting timestamp that is `window_size` rows before start_date."""
+        date_index = df.index
+        start_idx = date_index.searchsorted(start_date)
+        return date_index[start_idx - window_size]
+
+    # Compute effective starts
+    train_start_eff = get_effective_start(df_prices, train_start_date, window_size)
+    val_start_eff = get_effective_start(df_prices, val_start_date, window_size)
+    test_start_eff = get_effective_start(df_prices, test_start_date, window_size)
+
     # Slicing
-    train_prices = df_prices[train_start_date:train_end_date]
-    train_returns = df_ret[train_start_date:train_end_date]
-    train_vola = vol_df[train_start_date:train_end_date]
+    train_prices = df_prices.loc[train_start_eff:train_end_date]
+    train_returns = df_ret.loc[train_start_eff:train_end_date]
+    train_vola = vol_df.loc[train_start_eff:train_end_date]
 
-    val_prices = df_prices[val_start_date:val_end_date]
-    val_returns = df_ret[val_start_date:val_end_date]
-    val_vola = vol_df[val_start_date:val_end_date]
+    val_prices = df_prices.loc[val_start_eff:val_end_date]
+    val_returns = df_ret.loc[val_start_eff:val_end_date]
+    val_vola = vol_df.loc[val_start_eff:val_end_date]
 
-    test_prices = df_prices[test_start_date:test_end_date]
-    test_returns = df_ret[test_start_date:test_end_date]
-    test_vola = vol_df[test_start_date:test_end_date]
+    test_prices = df_prices.loc[test_start_eff:test_end_date]
+    test_returns = df_ret.loc[test_start_eff:test_end_date]
+    test_vola = vol_df.loc[test_start_eff:test_end_date]
 
-    # Basic check for empty slices
+    # Sanity checks
     if train_prices.empty or val_prices.empty or test_prices.empty:
-        print(
-            "WARNING: One or more data slices are empty. Check date ranges and data availability."
+        raise ValueError(
+            "One or more data slices are empty. Check date ranges and data availability."
         )
-        raise ValueError("Empty data slices detected")
 
     return (
         (train_prices, train_returns, train_vola),
@@ -253,7 +257,7 @@ def backtest_agent(
         Dictionary of backtest metrics
     """
     test_prices, test_returns, test_vola = test_data
-    
+
     # Create test environment
     env_test_config = create_env_config(
         test_prices, test_returns, test_vola, drl_config
@@ -270,7 +274,9 @@ def backtest_agent(
 
     # Run backtest
     print("    Running backtest evaluation...")
-    backtest_metrics, backtest_portfolio = agent.evaluate(eval_env=env_test, n_eval_episodes=1)
+    backtest_metrics, backtest_portfolio = agent.evaluate(
+        eval_env=env_test, n_eval_episodes=1
+    )
 
     return backtest_metrics, backtest_portfolio
 
@@ -347,9 +353,15 @@ def process_window(
         return None, {"status": "no_best_agent", "metrics": {}}
 
     # Run backtest
-    backtest_metrics, backtest_portfolio = backtest_agent(best_agent_path, test_data, drl_config)
+    backtest_metrics, backtest_portfolio = backtest_agent(
+        best_agent_path, test_data, drl_config
+    )
 
-    return best_agent_path, {"status": "completed", "metrics": backtest_metrics}, backtest_portfolio
+    return (
+        best_agent_path,
+        backtest_metrics,
+        backtest_portfolio,
+    )
 
 
 def training_pipeline(
@@ -368,22 +380,25 @@ def training_pipeline(
 
     all_backtest_results = []
     best_agent_paths_per_window = []
-    all_portfolios = []
+    all_portfolios = {}
 
     os.makedirs(drl_config.model_save_dir, exist_ok=True)
     os.makedirs(drl_config.tensorboard_log_dir, exist_ok=True)
-    
-    drl_config.learning_rate_schedule = linear_schedule(drl_config.initial_lr, drl_config.final_lr)
+
+    drl_config.learning_rate_schedule = linear_schedule(
+        drl_config.initial_lr, drl_config.final_lr
+    )
 
     # Process each window
-    for i_window in range(drl_config.n_windows):
-        current_start_year = drl_config.base_start_year + i_window
+    for idx_window in range(drl_config.n_windows):
+        current_start_year = drl_config.base_start_year + idx_window
         print(
-            f"--- Starting Window {i_window + 1}/{drl_config.n_windows} (Train Year Start: {current_start_year}) ---"
+            f"--- Starting Window {idx_window + 1}/{drl_config.n_windows} (Train Year Start: {current_start_year}) ---"
         )
 
         # Slice data for current window
         data_slices = slice_data(
+            drl_config=drl_config,
             year_start=current_start_year,
             num_train_years=5,
             num_val_years=1,
@@ -398,7 +413,7 @@ def training_pipeline(
             best_agent_paths_per_window[-1] if best_agent_paths_per_window else None
         )
         best_agent_path, window_results, backtest_portfolio = process_window(
-            window_idx=i_window,
+            window_idx=idx_window,
             data_slices=data_slices,
             drl_config=drl_config,
             previous_best_agent_path=previous_best_agent_path,
@@ -407,11 +422,11 @@ def training_pipeline(
         best_agent_paths_per_window.append(best_agent_path)
         all_backtest_results.append(
             {
-                "window": i_window + 1,
-                "best_agent_path": best_agent_path,
+                "window": idx_window + 1,
+                "best_agent_path": best_agent_path.split("/")[-1].split(".")[0],
                 **window_results,
             }
         )
-        all_portfolios.append(backtest_portfolio)
+        all_portfolios[idx_window] = backtest_portfolio
 
     return all_backtest_results, all_portfolios
