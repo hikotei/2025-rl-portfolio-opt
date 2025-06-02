@@ -253,9 +253,7 @@ def backtest_agent(
         Dictionary of backtest metrics
     """
     test_prices, test_returns, test_vola = test_data
-    print(test_prices.head())
-    print(test_prices.tail())
-
+    
     # Create test environment
     env_test_config = create_env_config(
         test_prices, test_returns, test_vola, drl_config

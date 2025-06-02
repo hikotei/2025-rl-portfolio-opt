@@ -110,7 +110,7 @@ class PortfolioEnv(gym.Env):
             observation, info
         """
         super().reset(seed=seed)
-        self.current_step = 0
+        self.current_step = self.window_size
         self.portfolio.reset()
         self.A_t = 0.0
         self.B_t = 0.0
