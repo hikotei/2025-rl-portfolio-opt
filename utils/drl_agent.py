@@ -81,17 +81,7 @@ class DRLAgent:
         -   `self.training_metrics`: Initialized to None, will store training metrics later.
         """
         self.original_env_class = type(env)
-        env_params = {
-            "returns_df": env.returns_df,
-            "prices_df": env.prices_df,
-            "vola_df": env.vola_df,
-            "window_size": env.window_size,
-            "transaction_cost": env.transaction_cost,
-            "initial_balance": env.initial_balance,
-            "reward_scaling": env.reward_scaling,
-        }
-        if hasattr(env, "eta"):
-            env_params["eta"] = env.eta
+        env_params = env.get_params()
         self.original_env_kwargs = env_params
 
         def make_env_closure(rank: int, seed: int = 0, env_class=None, env_kwargs=None):
@@ -106,23 +96,18 @@ class DRLAgent:
             set_random_seed(seed)
             return _init
 
-        self.env = SubprocVecEnv(
-            [
-                make_env_closure(
-                    i, seed, self.original_env_class, self.original_env_kwargs
-                )
-                for i in range(n_envs)
-            ],
-            start_method="fork",
-        )
-
-        if policy_kwargs is None:
-            policy_kwargs = dict(
-                activation_fn=torch.nn.Tanh, net_arch=[64, 64], log_std_init=-1.0
+        if n_envs > 1:
+            self.env = SubprocVecEnv(
+                [
+                    make_env_closure(
+                        i, seed, self.original_env_class, self.original_env_kwargs
+                    )
+                    for i in range(n_envs)
+                ],
+                start_method="fork",
             )
-
-        if "log_std_init" in policy_kwargs:
-            policy_kwargs["log_std_init"] = float(policy_kwargs["log_std_init"])
+        else:
+            self.env = self.original_env_class(**self.original_env_kwargs)
 
         self.model = PPO(
             policy,
@@ -240,6 +225,10 @@ class DRLAgent:
 
         for episode in range(n_eval_episodes):
             obs, info = eval_env.reset()
+
+            print('DEBUG')
+            print("eval env current step at start of eval", eval_env.current_step)
+            
             done = False
             episode_total_reward = 0.0
 

@@ -67,28 +67,13 @@ def slice_data(
     num_train_years: int,
     num_val_years: int,
     num_test_years: int,
-    df_prices: pd.DataFrame,
-    df_ret: pd.DataFrame,
-    vol_df: pd.DataFrame,
-) -> Tuple[
-    Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame],
-    Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame],
-    Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame],
-]:
+):
     """
-    Slice data for a given window configuration.
-
     Args:
         year_start: Starting year for the window
         num_train_years: Number of years for training
         num_val_years: Number of years for validation
         num_test_years: Number of years for testing
-        df_prices: Full price dataframe
-        df_ret: Full returns dataframe
-        vol_df: Full volatility dataframe
-
-    Returns:
-        Tuple of (train_data, val_data, test_data) where each is a tuple of (prices, returns, vol)
     """
     train_start_date = pd.to_datetime(f"{year_start}-01-01")
     train_end_date = pd.to_datetime(f"{year_start + num_train_years - 1}-12-31")
@@ -109,30 +94,14 @@ def slice_data(
     print(f"  Val Period  : {val_start_date.date()} to {val_end_date.date()}")
     print(f"  Test Period : {test_start_date.date()} to {test_end_date.date()}")
 
-    # Slicing
-    train_prices = df_prices[train_start_date:train_end_date]
-    train_returns = df_ret[train_start_date:train_end_date]
-    train_vola = vol_df[train_start_date:train_end_date]
-
-    val_prices = df_prices[val_start_date:val_end_date]
-    val_returns = df_ret[val_start_date:val_end_date]
-    val_vola = vol_df[val_start_date:val_end_date]
-
-    test_prices = df_prices[test_start_date:test_end_date]
-    test_returns = df_ret[test_start_date:test_end_date]
-    test_vola = vol_df[test_start_date:test_end_date]
-
-    # Basic check for empty slices
-    if train_prices.empty or val_prices.empty or test_prices.empty:
-        print(
-            "WARNING: One or more data slices are empty. Check date ranges and data availability."
-        )
-        raise ValueError("Empty data slices detected")
-
+    # return just the dates
     return (
-        (train_prices, train_returns, train_vola),
-        (val_prices, val_returns, val_vola),
-        (test_prices, test_returns, test_vola),
+        train_start_date,
+        train_end_date,
+        val_start_date,
+        val_end_date,
+        test_start_date,
+        test_end_date,
     )
 
 
@@ -140,6 +109,8 @@ def create_env_config(
     df_prices: pd.DataFrame,
     df_ret: pd.DataFrame,
     df_vola: pd.DataFrame,
+    start_date,
+    end_date,
     drl_config: DRLConfig,
 ) -> Dict[str, Any]:
     """
@@ -163,6 +134,8 @@ def create_env_config(
         "initial_balance": drl_config.initial_balance,
         "reward_scaling": drl_config.reward_scaling,
         "eta": drl_config.eta_dsr,
+        "start_date": start_date,
+        "end_date": end_date,
     }
 
 
@@ -238,7 +211,11 @@ def train_single_agent(
 
 def backtest_agent(
     agent_path: str,
-    test_data: Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame],
+    df_prices: pd.DataFrame,
+    df_ret: pd.DataFrame,
+    df_vol: pd.DataFrame,
+    start_date: pd.Timestamp,
+    end_date: pd.Timestamp,
     drl_config: DRLConfig,
 ) -> Dict[str, float]:
     """
@@ -252,13 +229,9 @@ def backtest_agent(
     Returns:
         Dictionary of backtest metrics
     """
-    test_prices, test_returns, test_vola = test_data
-    print(test_prices.head())
-    print(test_prices.tail())
-
     # Create test environment
     env_test_config = create_env_config(
-        test_prices, test_returns, test_vola, drl_config
+        df_prices, df_ret, df_vol, start_date, end_date, drl_config
     )
     env_test = PortfolioEnv(**env_test_config)
 
@@ -272,18 +245,19 @@ def backtest_agent(
 
     # Run backtest
     print("    Running backtest evaluation...")
-    backtest_metrics, backtest_portfolio = agent.evaluate(eval_env=env_test, n_eval_episodes=1)
+    backtest_metrics, backtest_portfolio = agent.evaluate(
+        eval_env=env_test, n_eval_episodes=1
+    )
 
     return backtest_metrics, backtest_portfolio
 
 
 def process_window(
     window_idx: int,
-    data_slices: Tuple[
-        Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame],
-        Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame],
-        Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame],
-    ],
+    date_slices: Tuple,
+    df_prices: pd.DataFrame,
+    df_ret: pd.DataFrame,
+    df_vol: pd.DataFrame,
     drl_config: DRLConfig,
     previous_best_agent_path: Optional[str] = None,
 ) -> Tuple[Optional[str], Dict[str, Any]]:
@@ -299,25 +273,23 @@ def process_window(
     Returns:
         Tuple of (best_agent_path, backtest_results)
     """
-    train_data, val_data, test_data = data_slices
-    train_prices, train_returns, train_vola = train_data
-    val_prices, val_returns, val_vola = val_data
 
-    # Check data length
-    min_data_len = drl_config.env_window_size + 1
-    if (
-        len(train_prices) < min_data_len
-        or len(val_prices) < min_data_len
-        or len(test_data[0]) < min_data_len
-    ):
-        print(f"SKIPPING Window {window_idx + 1} due to insufficient data length.")
-        return None, {"status": "skipped_insufficient_data", "metrics": {}}
+    (
+        train_start_date,
+        train_end_date,
+        val_start_date,
+        val_end_date,
+        test_start_date,
+        test_end_date,
+    ) = date_slices
 
     # Create environments
     env_train_config = create_env_config(
-        train_prices, train_returns, train_vola, drl_config
+        df_prices, df_ret, df_vol, train_start_date, train_end_date, drl_config
     )
-    env_val_config = create_env_config(val_prices, val_returns, val_vola, drl_config)
+    env_val_config = create_env_config(
+        df_prices, df_ret, df_vol, val_start_date, val_end_date, drl_config
+    )
 
     env_train = PortfolioEnv(**env_train_config)
     env_val = PortfolioEnv(**env_val_config)
@@ -327,6 +299,7 @@ def process_window(
     best_agent_path = None
 
     for i_agent in range(drl_config.agents_per_window):
+
         agent_seed = (window_idx * drl_config.agents_per_window) + i_agent
         print(
             f"  Training Agent {i_agent + 1}/{drl_config.agents_per_window} with seed {agent_seed}..."
@@ -349,9 +322,21 @@ def process_window(
         return None, {"status": "no_best_agent", "metrics": {}}
 
     # Run backtest
-    backtest_metrics, backtest_portfolio = backtest_agent(best_agent_path, test_data, drl_config)
+    backtest_metrics, backtest_portfolio = backtest_agent(
+        best_agent_path,
+        df_prices,
+        df_ret,
+        df_vol,
+        test_start_date,
+        test_end_date,
+        drl_config,
+    )
 
-    return best_agent_path, {"status": "completed", "metrics": backtest_metrics}, backtest_portfolio
+    return (
+        best_agent_path,
+        {"status": "completed", "metrics": backtest_metrics},
+        backtest_portfolio,
+    )
 
 
 def training_pipeline(
@@ -374,8 +359,10 @@ def training_pipeline(
 
     os.makedirs(drl_config.model_save_dir, exist_ok=True)
     os.makedirs(drl_config.tensorboard_log_dir, exist_ok=True)
-    
-    drl_config.learning_rate_schedule = linear_schedule(drl_config.initial_lr, drl_config.final_lr)
+
+    drl_config.learning_rate_schedule = linear_schedule(
+        drl_config.initial_lr, drl_config.final_lr
+    )
 
     # Process each window
     for i_window in range(drl_config.n_windows):
@@ -385,14 +372,11 @@ def training_pipeline(
         )
 
         # Slice data for current window
-        data_slices = slice_data(
+        date_slices = slice_data(
             year_start=current_start_year,
             num_train_years=5,
             num_val_years=1,
             num_test_years=1,
-            df_prices=df_prices,
-            df_ret=df_ret,
-            vol_df=df_vol,
         )
 
         # Process window
@@ -401,7 +385,10 @@ def training_pipeline(
         )
         best_agent_path, window_results, backtest_portfolio = process_window(
             window_idx=i_window,
-            data_slices=data_slices,
+            date_slices=date_slices,
+            df_prices=df_prices,
+            df_ret=df_ret,
+            df_vol=df_vol,
             drl_config=drl_config,
             previous_best_agent_path=previous_best_agent_path,
         )

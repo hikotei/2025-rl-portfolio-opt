@@ -11,6 +11,10 @@ class DRLConfig:
     agents_per_window: int = 2
     base_start_year: int = 2006
 
+    num_train_years: int = 5
+    num_val_years: int = 1
+    num_test_years: int = 1
+
     # Environment parameters
     env_window_size: int = 60
     transaction_cost: float = 0.0

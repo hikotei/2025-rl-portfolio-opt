@@ -4,7 +4,7 @@ import pandas as pd
 import gymnasium as gym
 from gymnasium import spaces
 
-from typing import Dict, Tuple, Optional, Union, List
+from typing import Dict, Tuple, Optional, Union, List, Any
 from utils.portfolio import Portfolio
 
 
@@ -37,6 +37,8 @@ class PortfolioEnv(gym.Env):
         initial_balance: float = 100_000,
         reward_scaling: float = 1.0,
         eta: float = 1 / 252,  # smooth param for DSR
+        start_date: pd.Timestamp = None,
+        end_date: pd.Timestamp = None,
     ):
         """
         Initialize the portfolio environment with historical data and parameters.
@@ -46,11 +48,20 @@ class PortfolioEnv(gym.Env):
         """
         super().__init__()
 
-        # Store data
-        self.returns_df = returns_df
-        self.prices_df = prices_df
-        self.vola_df = vola_df
         self.window_size = window_size
+        self.start_date = start_date
+        self.end_date = end_date
+
+        # exact start date doesnt always exist, so we need to get the closest index
+        idx = returns_df.index
+        self.start_idx = idx.searchsorted(self.start_date, side="left")
+        self.end_idx = idx.searchsorted(self.end_date, side="right") - 1
+
+        # Store data ( cutoff after end_idx )
+        self.returns_df = returns_df.iloc[:self.end_idx]
+        self.prices_df = prices_df.iloc[:self.end_idx]
+        self.vola_df = vola_df.iloc[:self.end_idx]
+
         self.transaction_cost = transaction_cost
         self.initial_balance = initial_balance
         self.reward_scaling = reward_scaling
@@ -72,7 +83,7 @@ class PortfolioEnv(gym.Env):
         # Get number of assets (including those with NaNs)
         self.n_assets = len(returns_df.columns)
 
-        # UserWarning: We recommend you to use a symmetric and normalized Box action space (range=[-1, 1]) 
+        # UserWarning: We recommend you to use a symmetric and normalized Box action space (range=[-1, 1])
         # cf. https://stable-baselines3.readthedocs.io/en/master/guide/rl_tips.html
 
         # Define action space (portfolio weights)
@@ -82,7 +93,7 @@ class PortfolioEnv(gym.Env):
 
         # Define observation space as outlined in paper
         # TODO: think about flattening the observation matrix ...
-        # UserWarning: Your observation  has an unconventional shape (neither an image, nor a 1D vector). 
+        # UserWarning: Your observation  has an unconventional shape (neither an image, nor a 1D vector).
         # We recommend you to flatten the observation to have only a 1D vector or use a custom policy to properly process the data.
         self.observation_space = spaces.Box(
             low=-np.inf,
@@ -130,15 +141,6 @@ class PortfolioEnv(gym.Env):
         Returns:
             observation, reward, terminated, truncated, info
         """
-        # # Handle vectorized actions - each environment should get its corresponding action
-        # if len(action.shape) == 2:
-        #     # Get the action for this specific environment
-        #     action = action[0]  # This environment's action
-
-        # # Convert single float to array if needed
-        # if isinstance(action, (np.float32, float)):
-        #     action = np.array([action] * self.n_assets, dtype=np.float32)
-
         # Check for NaN in action
         if np.isnan(action).any():
             raise ValueError("NaN values in action")
@@ -177,10 +179,6 @@ class PortfolioEnv(gym.Env):
         self.A_t = self.prev_A_t + self.eta * (portfolio_return - self.prev_A_t)
         self.B_t = self.prev_B_t + self.eta * (portfolio_return**2 - self.prev_B_t)
 
-        # Check for NaN in moving averages
-        if np.isnan(self.A_t) or np.isnan(self.B_t):
-            raise ValueError(f"NaN in moving averages at step {self.current_step}")
-
         # Move to next step
         self.current_step += 1
 
@@ -197,6 +195,8 @@ class PortfolioEnv(gym.Env):
             "shares": self.portfolio.positions,
             "weights": self.portfolio.weights,
             "w_c": self.portfolio.w_c,
+            "current_step": self.current_step,
+            "current_date": self.prices_df.index[self.current_step],
         }
         return observation, reward, terminated, truncated, info
 
@@ -207,11 +207,13 @@ class PortfolioEnv(gym.Env):
             State observation array
         """
         # Get returns window (shape: window_size x n_assets)
-        returns_window = self.returns_df.iloc[
-            self.current_step - self.window_size : self.current_step
-        ].values
+        start = self.start_idx + self.current_step - self.window_size
+        end = self.start_idx + self.current_step
+        
+        # Get the available returns data
+        returns_window = self.returns_df.iloc[start:end].values
         returns_window = np.nan_to_num(returns_window, nan=0.0)
-
+        
         # Get current weights from portfolio
         weights_full = np.append(
             list(self.portfolio.weights.values()), self.portfolio.w_c
@@ -230,7 +232,19 @@ class PortfolioEnv(gym.Env):
         observation[:n_assets, 1 : 1 + self.window_size] = returns_window.T
 
         # Fill 3 values after w_c in last row with vol features
-        vol_features = self.vola_df.iloc[self.current_step].values  # shape: (3,)
+        try:
+            vol_features = self.vola_df.iloc[
+                self.start_idx + self.current_step
+            ].values  # shape: (3,)
+        except Exception as e:
+            print('DEBUG')
+            print(e)
+            print("start_idx", self.start_idx)
+            print("current_date", self.prices_df.index[self.current_step])
+            print("current_step", self.current_step)
+            print("vola_df.index", self.vola_df.index)
+            raise ValueError("Error getting vol features")
+
         observation[-1, 1:4] = vol_features
 
         # Check for NaN values
@@ -257,7 +271,7 @@ class PortfolioEnv(gym.Env):
             Reward value
         """
         # If first step, no DSR can be computed
-        if self.current_step == self.window_size:
+        if self.current_step == 0:
             return 0.0
 
         # Use previous A_t and B_t for DSR calculation
@@ -300,6 +314,23 @@ class PortfolioEnv(gym.Env):
         Clean up environment resources.
         """
         pass
+
+    def get_params(self) -> Dict[str, Any]:
+        """
+        Returns a dictionary containing all initialization parameters of the environment.>
+        """
+        return {
+            "returns_df": self.returns_df,
+            "prices_df": self.prices_df,
+            "vola_df": self.vola_df,
+            "window_size": self.window_size,
+            "transaction_cost": self.transaction_cost,
+            "initial_balance": self.initial_balance,
+            "reward_scaling": self.reward_scaling,
+            "eta": self.eta,
+            "start_date": self.start_date,
+            "end_date": self.end_date,
+        }
 
     def calc_metrics(
         self,
