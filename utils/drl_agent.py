@@ -35,7 +35,7 @@ class DRLAgent:
         ----------
         env : object
             The environment instance. It should have attributes like `returns_df`,
-            `prices_df`, `vol_df`, `window_size`, `transaction_cost`,
+            `prices_df`, `vola_df`, `window_size`, `transaction_cost`,
             `initial_balance`, and `reward_scaling`.
         n_envs : int, optional
             The number of parallel environments to use for training. Default is 1.
@@ -84,7 +84,7 @@ class DRLAgent:
         env_params = {
             "returns_df": env.returns_df,
             "prices_df": env.prices_df,
-            "vol_df": env.vol_df,
+            "vola_df": env.vola_df,
             "window_size": env.window_size,
             "transaction_cost": env.transaction_cost,
             "initial_balance": env.initial_balance,
@@ -276,4 +276,4 @@ class DRLAgent:
                     portfolio.current_balance
                 )
 
-        return eval_metrics
+        return eval_metrics, portfolio

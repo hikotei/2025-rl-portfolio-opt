@@ -31,7 +31,7 @@ class PortfolioEnv(gym.Env):
         self,
         returns_df: pd.DataFrame,
         prices_df: pd.DataFrame,
-        vol_df: pd.DataFrame,
+        vola_df: pd.DataFrame,
         window_size: int = 60,
         transaction_cost: float = 0,
         initial_balance: float = 100_000,
@@ -42,14 +42,14 @@ class PortfolioEnv(gym.Env):
         Initialize the portfolio environment with historical data and parameters.
 
         prices_df is used for step function rebalancing of weights and portfolio value calculation
-        returns_df and vol_df are only used to construct observations
+        returns_df and vola_df are only used to construct observations
         """
         super().__init__()
 
         # Store data
         self.returns_df = returns_df
         self.prices_df = prices_df
-        self.vol_df = vol_df
+        self.vola_df = vola_df
         self.window_size = window_size
         self.transaction_cost = transaction_cost
         self.initial_balance = initial_balance
@@ -110,7 +110,7 @@ class PortfolioEnv(gym.Env):
             observation, info
         """
         super().reset(seed=seed)
-        self.current_step = self.window_size
+        self.current_step = 0
         self.portfolio.reset()
         self.A_t = 0.0
         self.B_t = 0.0
@@ -130,14 +130,14 @@ class PortfolioEnv(gym.Env):
         Returns:
             observation, reward, terminated, truncated, info
         """
-        # Handle vectorized actions - each environment should get its corresponding action
-        if len(action.shape) == 2:
-            # Get the action for this specific environment
-            action = action[0]  # This environment's action
+        # # Handle vectorized actions - each environment should get its corresponding action
+        # if len(action.shape) == 2:
+        #     # Get the action for this specific environment
+        #     action = action[0]  # This environment's action
 
-        # Convert single float to array if needed
-        if isinstance(action, (np.float32, float)):
-            action = np.array([action] * self.n_assets, dtype=np.float32)
+        # # Convert single float to array if needed
+        # if isinstance(action, (np.float32, float)):
+        #     action = np.array([action] * self.n_assets, dtype=np.float32)
 
         # Check for NaN in action
         if np.isnan(action).any():
@@ -194,7 +194,7 @@ class PortfolioEnv(gym.Env):
         info = {
             "portfolio_value": self.portfolio.current_balance,
             "portfolio_return": portfolio_return,
-            "shares": self.portfolio.asset_holdings_shares,
+            "shares": self.portfolio.positions,
             "weights": self.portfolio.weights,
             "w_c": self.portfolio.w_c,
         }
@@ -230,7 +230,7 @@ class PortfolioEnv(gym.Env):
         observation[:n_assets, 1 : 1 + self.window_size] = returns_window.T
 
         # Fill 3 values after w_c in last row with vol features
-        vol_features = self.vol_df.iloc[self.current_step].values  # shape: (3,)
+        vol_features = self.vola_df.iloc[self.current_step].values  # shape: (3,)
         observation[-1, 1:4] = vol_features
 
         # Check for NaN values
