@@ -54,6 +54,7 @@ class PortfolioEnv(gym.Env):
         self.transaction_cost = transaction_cost
         self.initial_balance = initial_balance
         self.reward_scaling = reward_scaling
+        self.current_step = self.window_size
 
         # Exponential moving average
         self.eta = eta

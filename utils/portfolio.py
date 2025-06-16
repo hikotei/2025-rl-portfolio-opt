@@ -48,11 +48,14 @@ class Portfolio:
                         "Value": f"$ {value:,.2f}",
                     }
                 )
-        df = pd.DataFrame(data)
-        df = df[["Asset", "Shares", "Weight", "Value"]]
 
         print("\nCurrent Holdings:")
-        print(df.to_markdown(index=False))
+        if data:  # Only create and display DataFrame if there is data
+            df = pd.DataFrame(data)
+            df = df[["Asset", "Shares", "Weight", "Value"]]
+            print(df.to_markdown(index=False))
+        else:
+            print("No current holdings")
 
         if self.history:
             print("\n=== Performance Metrics ===")
@@ -220,8 +223,17 @@ class Portfolio:
     def get_history(self):
         """
         Get the portfolio history as a DataFrame.
+
+        Returns:
+            pd.DataFrame: Portfolio history with date as index if available,
+                         otherwise returns DataFrame without index
         """
-        return pd.DataFrame(self.history).set_index("date")
+        if not self.history:
+            print("No history found")
+            return pd.DataFrame()
+        else:
+            df = pd.DataFrame(self.history).set_index("date")
+            return df
 
     def calc_metrics(self, risk_free_rate=0):
         """

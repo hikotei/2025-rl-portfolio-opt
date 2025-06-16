@@ -77,7 +77,12 @@ def slice_data(
     Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame],
 ]:
     """
-    Slice data for a given window configuration with non-consecutive dates.
+    Slice data for a given window configuration
+
+    !! ATTENTION !!
+    in order to properly train or test in the given timeframe
+    the model needs window_size datapoints in the first iteration (ie the start date)
+    which means that we actually need to include window_size datapoints before the start date
 
     Returns:
         Tuple of (train_data, val_data, test_data) where each is a tuple of (prices, returns, vol)
