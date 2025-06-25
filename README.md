@@ -60,7 +60,7 @@ portfolio_opt/
 - Handles integer share constraints
 
 ### Mean-Variance Optimization
-`MVOPortfolio` (utils/mvo_strategy.py)
+`MVOStrategy` (utils/mvo_strategy.py)
 - Implements rolling-window MVO strategy
 - Uses Ledoit-Wolf shrinkage for robust covariance estimation
 - Optimizes Sharpe ratio with long-only constraints
