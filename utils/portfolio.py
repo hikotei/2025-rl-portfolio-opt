@@ -1,5 +1,7 @@
 import numpy as np
 import pandas as pd
+import plotly.graph_objects as go
+import plotly.express as px
 
 
 class Portfolio:
@@ -375,3 +377,106 @@ class Portfolio:
             "Daily value at risk (95%)": var_95,
             "Portfolio turnover (in %)": portfolio_turnover,
         }
+
+    def plot_value_history(self):
+        """
+        Plot portfolio value development over time using Plotly.
+
+        Returns:
+            plotly.graph_objects.Figure: Interactive plot of portfolio value history
+        """
+        if not self.history:
+            print("No history found")
+            return None
+
+        df = pd.DataFrame(self.history)
+        
+        fig = go.Figure()
+        
+        # Add portfolio value line
+        fig.add_trace(
+            go.Scatter(
+                x=df['date'],
+                y=df['portfolio_value'],
+                name='Portfolio Value',
+                line=dict(color='#1f77b4', width=2),
+                hovertemplate='Date: %{x}<br>Value: $%{y:,.2f}<extra></extra>'
+            )
+        )
+        
+        # Add initial balance reference line
+        fig.add_hline(
+            y=self.initial_balance,
+            line_dash="dash",
+            line_color="gray",
+            annotation_text=f"Initial Balance (${self.initial_balance:,.0f})",
+            annotation_position="right"
+        )
+        
+        # Update layout
+        fig.update_layout(
+            title='Portfolio Value Development',
+            xaxis_title='Date',
+            yaxis_title='Portfolio Value ($)',
+            hovermode='x unified',
+            showlegend=True,
+            template='plotly_white'
+        )
+        
+        return fig
+
+    def plot_composition_history(self):
+        """
+        Plot portfolio composition (weights) development over time using Plotly.
+
+        Returns:
+            plotly.graph_objects.Figure: Interactive plot of portfolio composition history
+        """
+        if not self.history:
+            print("No history found")
+            return None
+
+        df = pd.DataFrame(self.history)
+        
+        # Get weight columns
+        weight_cols = [col for col in df.columns if col.startswith('w_')]
+        weights_df = df[['date'] + weight_cols]
+        
+        # Rename columns to remove 'w_' prefix
+        weights_df.columns = ['date'] + [col[2:] for col in weight_cols]
+        
+        # Melt the dataframe for plotting
+        melted_df = weights_df.melt(
+            id_vars=['date'],
+            var_name='Asset',
+            value_name='Weight'
+        )
+        
+        # Create stacked area chart
+        fig = px.area(
+            melted_df,
+            x='date',
+            y='Weight',
+            color='Asset',
+            title='Portfolio Composition Over Time',
+            labels={'Weight': 'Weight (%)', 'date': 'Date'},
+            
+        )
+        
+        # Update layout
+        fig.update_layout(
+            yaxis=dict(
+                tickformat='.0%',
+                range=[0, 1]
+            ),
+            hovermode='x unified',
+            showlegend=True,
+            template='plotly_white'
+        )
+        
+        # Update hover template
+        # fig.update_traces(
+        #     hovertemplate='Date: %{x}<br>Weight: %{y:.1%}<extra></extra>'
+        # )
+        
+        return fig

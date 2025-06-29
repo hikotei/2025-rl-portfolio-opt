@@ -29,9 +29,9 @@ class PortfolioEnv(gym.Env):
 
     def __init__(
         self,
-        returns_df: pd.DataFrame,
-        prices_df: pd.DataFrame,
-        vola_df: pd.DataFrame,
+        df_returns: pd.DataFrame,
+        df_prices: pd.DataFrame,
+        df_vola: pd.DataFrame,
         window_size: int = 60,
         transaction_cost: float = 0,
         initial_balance: float = 100_000,
@@ -41,15 +41,15 @@ class PortfolioEnv(gym.Env):
         """
         Initialize the portfolio environment with historical data and parameters.
 
-        prices_df is used for step function rebalancing of weights and portfolio value calculation
-        returns_df and vola_df are only used to construct observations
+        df_prices is used for step function rebalancing of weights and portfolio value calculation
+        df_returns and df_vola are only used to construct observations
         """
         super().__init__()
 
         # Store data
-        self.returns_df = returns_df
-        self.prices_df = prices_df
-        self.vola_df = vola_df
+        self.df_returns = df_returns
+        self.df_prices = df_prices
+        self.df_vola = df_vola
         self.window_size = window_size
         self.transaction_cost = transaction_cost
         self.initial_balance = initial_balance
@@ -66,12 +66,12 @@ class PortfolioEnv(gym.Env):
 
         # Identify columns with NaN values
         self.nan_cols = []
-        for col in returns_df.columns:
-            if returns_df[col].isna().any() or prices_df[col].isna().any():
+        for col in df_returns.columns:
+            if df_returns[col].isna().any() or df_prices[col].isna().any():
                 self.nan_cols.append(col)
 
         # Get number of assets (including those with NaNs)
-        self.n_assets = len(returns_df.columns)
+        self.n_assets = len(df_returns.columns)
 
         # UserWarning: We recommend you to use a symmetric and normalized Box action space (range=[-1, 1]) 
         # cf. https://stable-baselines3.readthedocs.io/en/master/guide/rl_tips.html
@@ -93,7 +93,7 @@ class PortfolioEnv(gym.Env):
         )
 
         # Initialize portfolio
-        self.portfolio = Portfolio(returns_df.columns, initial_balance)
+        self.portfolio = Portfolio(df_returns.columns, initial_balance)
 
     def reset(
         self,
@@ -149,17 +149,17 @@ class PortfolioEnv(gym.Env):
         weights = exp_action / np.sum(exp_action)
 
         # Handle NaN columns - set weights to 0 for assets with missing data
-        mask = self.prices_df.columns.isin(self.nan_cols)
+        mask = self.df_prices.columns.isin(self.nan_cols)
         weights[mask] = 0
 
         # Get current prices
-        current_prices = self.prices_df.iloc[self.current_step].fillna(0)
+        current_prices = self.df_prices.iloc[self.current_step].fillna(0)
 
         # Rebalance portfolio with new weights
         self.portfolio.update_rebalance(
             current_prices,
-            dict(zip(self.prices_df.columns, weights)),
-            date=self.prices_df.index[self.current_step],
+            dict(zip(self.df_prices.columns, weights)),
+            date=self.df_prices.index[self.current_step],
         )
 
         # Calculate portfolio return
@@ -186,7 +186,7 @@ class PortfolioEnv(gym.Env):
         self.current_step += 1
 
         # Check if episode is done
-        terminated = self.current_step >= len(self.returns_df) - 1
+        terminated = self.current_step >= len(self.df_returns) - 1
         truncated = False
 
         # Get new observation
@@ -208,7 +208,7 @@ class PortfolioEnv(gym.Env):
             State observation array
         """
         # Get returns window (shape: window_size x n_assets)
-        returns_window = self.returns_df.iloc[
+        returns_window = self.df_returns.iloc[
             self.current_step - self.window_size : self.current_step
         ].values
         returns_window = np.nan_to_num(returns_window, nan=0.0)
@@ -231,7 +231,7 @@ class PortfolioEnv(gym.Env):
         observation[:n_assets, 1 : 1 + self.window_size] = returns_window.T
 
         # Fill 3 values after w_c in last row with vol features
-        vol_features = self.vola_df.iloc[self.current_step].values  # shape: (3,)
+        vol_features = self.df_vola.iloc[self.current_step].values  # shape: (3,)
         observation[-1, 1:4] = vol_features
 
         # Check for NaN values

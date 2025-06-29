@@ -83,9 +83,9 @@ class DRLAgent:
         """
         self.original_env_class = type(env)
         env_params = {
-            "returns_df": env.returns_df,
-            "prices_df": env.prices_df,
-            "vola_df": env.vola_df,
+            "df_returns": env.df_returns,
+            "df_prices": env.df_prices,
+            "df_vola": env.df_vola,
             "window_size": env.window_size,
             "transaction_cost": env.transaction_cost,
             "initial_balance": env.initial_balance,
