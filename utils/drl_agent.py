@@ -5,7 +5,7 @@ from stable_baselines3 import PPO
 from stable_baselines3.common.vec_env import SubprocVecEnv, VecEnv
 from stable_baselines3.common.utils import set_random_seed
 from stable_baselines3.common.callbacks import BaseCallback
-from typing import Optional, Dict, Union, Any, Callable
+from typing import Optional, Dict, Any
 
 
 class DRLAgent:
@@ -13,12 +13,11 @@ class DRLAgent:
         self,
         env,
         n_envs: int = 1,
-        model_name: str = "ppo",
         policy: str = "MlpPolicy",
         n_steps: int = 2048,
         batch_size: int = 64,
         n_epochs: int = 10,
-        learning_rate: Union[float, Callable[[float], float]] = 0.0003,
+        learning_rate: float = 0.0003,
         gamma: float = 0.99,
         gae_lambda: float = 0.95,
         clip_range: float = 0.25,
@@ -54,9 +53,8 @@ class DRLAgent:
         n_epochs : int, optional
             The number of epochs to train the PPO model on the collected data per
             update. Default is 10.
-        learning_rate : Union[float, Callable[[float], float]], optional
-            The learning rate for the PPO optimizer. Can be a float or a schedule
-            function. Default is 0.0003.
+        learning_rate : float, optional
+            The learning rate for the PPO optimizer. Default is 0.0003.
         gamma : float, optional
             The discount factor for future rewards. Default is 0.99.
         gae_lambda : float, optional
@@ -83,7 +81,7 @@ class DRLAgent:
         """
         self.original_env_class = type(env)
         env_params = {
-            "df_returns": env.df_returns,
+            "df_ret": env.df_ret,
             "df_prices": env.df_prices,
             "df_vola": env.df_vola,
             "window_size": env.window_size,

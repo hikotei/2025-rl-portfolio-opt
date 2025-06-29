@@ -10,6 +10,7 @@ class DRLConfig:
     n_windows: int = 2
     agents_per_window: int = 2
     base_start_year: int = 2006
+    use_previous_best_seed: bool = True
 
     # Environment parameters
     env_window_size: int = 60

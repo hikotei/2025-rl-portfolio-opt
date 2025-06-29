@@ -29,7 +29,7 @@ class PortfolioEnv(gym.Env):
 
     def __init__(
         self,
-        df_returns: pd.DataFrame,
+        df_ret: pd.DataFrame,
         df_prices: pd.DataFrame,
         df_vola: pd.DataFrame,
         window_size: int = 60,
@@ -42,12 +42,12 @@ class PortfolioEnv(gym.Env):
         Initialize the portfolio environment with historical data and parameters.
 
         df_prices is used for step function rebalancing of weights and portfolio value calculation
-        df_returns and df_vola are only used to construct observations
+        df_ret and df_vola are only used to construct observations
         """
         super().__init__()
 
         # Store data
-        self.df_returns = df_returns
+        self.df_ret = df_ret
         self.df_prices = df_prices
         self.df_vola = df_vola
         self.window_size = window_size
@@ -66,12 +66,12 @@ class PortfolioEnv(gym.Env):
 
         # Identify columns with NaN values
         self.nan_cols = []
-        for col in df_returns.columns:
-            if df_returns[col].isna().any() or df_prices[col].isna().any():
+        for col in df_ret.columns:
+            if df_ret[col].isna().any() or df_prices[col].isna().any():
                 self.nan_cols.append(col)
 
         # Get number of assets (including those with NaNs)
-        self.n_assets = len(df_returns.columns)
+        self.n_assets = len(df_ret.columns)
 
         # UserWarning: We recommend you to use a symmetric and normalized Box action space (range=[-1, 1]) 
         # cf. https://stable-baselines3.readthedocs.io/en/master/guide/rl_tips.html
@@ -93,7 +93,7 @@ class PortfolioEnv(gym.Env):
         )
 
         # Initialize portfolio
-        self.portfolio = Portfolio(df_returns.columns, initial_balance)
+        self.portfolio = Portfolio(df_ret.columns, initial_balance)
 
     def reset(
         self,
@@ -186,7 +186,7 @@ class PortfolioEnv(gym.Env):
         self.current_step += 1
 
         # Check if episode is done
-        terminated = self.current_step >= len(self.df_returns) - 1
+        terminated = self.current_step >= len(self.df_ret) - 1
         truncated = False
 
         # Get new observation
@@ -208,7 +208,7 @@ class PortfolioEnv(gym.Env):
             State observation array
         """
         # Get returns window (shape: window_size x n_assets)
-        returns_window = self.df_returns.iloc[
+        returns_window = self.df_ret.iloc[
             self.current_step - self.window_size : self.current_step
         ].values
         returns_window = np.nan_to_num(returns_window, nan=0.0)

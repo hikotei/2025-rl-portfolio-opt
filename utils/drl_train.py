@@ -164,9 +164,9 @@ def create_env_config(
         Dictionary of environment parameters
     """
     return {
-        "returns_df": df_ret,
-        "prices_df": df_prices,
-        "vola_df": df_vola,
+        "df_ret": df_ret,
+        "df_prices": df_prices,
+        "df_vola": df_vola,
         "window_size": drl_config.env_window_size,
         "transaction_cost": drl_config.transaction_cost,
         "initial_balance": drl_config.initial_balance,
@@ -377,7 +377,9 @@ def training_pipeline(
 
     Args:
         drl_config: Training configuration
-        data_paths: Data file paths configuration
+        df_prices: Price data DataFrame
+        df_ret: Returns data DataFrame
+        df_vol: Volatility data DataFrame
 
     Returns:
         List of backtest results for each window
@@ -414,9 +416,13 @@ def training_pipeline(
         )
 
         # Process window
-        previous_best_agent_path = (
-            best_agent_paths_per_window[-1] if best_agent_paths_per_window else None
-        )
+        previous_best_agent_path = None
+        if drl_config.use_previous_best_seed and best_agent_paths_per_window:
+            previous_best_agent_path = best_agent_paths_per_window[-1]
+            print(f"  Using previous best agent: {os.path.basename(previous_best_agent_path)}")
+        else:
+            print("  Starting with fresh random initialization")
+
         best_agent_path, window_results, backtest_portfolio = process_window(
             window_idx=idx_window,
             data_slices=data_slices,
