@@ -1,14 +1,18 @@
-import torch
 import numpy as np
-
+import pandas as pd
 from stable_baselines3 import PPO
-from stable_baselines3.common.vec_env import SubprocVecEnv, VecEnv
+from stable_baselines3.common.vec_env import SubprocVecEnv
 from stable_baselines3.common.utils import set_random_seed
-from stable_baselines3.common.callbacks import BaseCallback
-from typing import Optional, Dict, Union, Any, Callable
+
+# from stable_baselines3.common.callbacks import BaseCallback
+from typing import Optional, Dict, Union, List, Any
 
 
 class DRLAgent:
+    """
+    DRLAgent for portfolio optimization using PPO and gymnasium environments.
+    """
+
     def __init__(
         self,
         env,
@@ -18,112 +22,75 @@ class DRLAgent:
         n_steps: int = 2048,
         batch_size: int = 64,
         n_epochs: int = 10,
-        learning_rate: Union[float, Callable[[float], float]] = 0.0003,
+        learning_rate: float = 0.0003,
         gamma: float = 0.99,
         gae_lambda: float = 0.95,
         clip_range: float = 0.25,
         seed: int = 0,
-        policy_kwargs: Optional[Dict[str, Any]] = None,
-        tensorboard_log: str = "./logs/",
     ):
         """
-        Initializes the DRLAgent.
-
-        This constructor sets up the reinforcement learning environment and initializes
-        the PPO (Proximal Policy Optimization) model with its specified configuration.
-
-        Parameters:
-        ----------
-        env : object
-            The environment instance. It should have attributes like `returns_df`,
-            `prices_df`, `vola_df`, `window_size`, `transaction_cost`,
-            `initial_balance`, and `reward_scaling`.
-        n_envs : int, optional
-            The number of parallel environments to use for training. Default is 1.
-        model_name : str, optional
-            The name of the DRL model to use. Currently, only 'ppo' is supported.
-            Default is "ppo".
-        policy : str, optional
-            The policy network type. For PPO, common choices are "MlpPolicy" for
-            multi-layer perceptron policies. Default is "MlpPolicy".
-        n_steps : int, optional
-            The number of steps to run for each environment per update. This is a PPO
-            hyperparameter. Default is 2048.
-        batch_size : int, optional
-            The mini-batch size for PPO updates. Default is 64.
-        n_epochs : int, optional
-            The number of epochs to train the PPO model on the collected data per
-            update. Default is 10.
-        learning_rate : Union[float, Callable[[float], float]], optional
-            The learning rate for the PPO optimizer. Can be a float or a schedule
-            function. Default is 0.0003.
-        gamma : float, optional
-            The discount factor for future rewards. Default is 0.99.
-        gae_lambda : float, optional
-            Factor for trade-off of bias vs variance for Generalized Advantage Estimator
-            (GAE). Default is 0.95.
-        clip_range : float, optional
-            The clipping parameter for PPO, defining the range within which the policy
-            ratio is clipped. Default is 0.25.
-        seed : int, optional
-            Random seed for reproducibility. Default is 0.
-        policy_kwargs : Optional[Dict[str, Any]], optional
-            Additional keyword arguments to pass to the policy network constructor.
-            If None, a default configuration (Tanh activation, [64, 64] net arch,
-            log_std_init=-1.0) is used. Default is None.
-
-        Initializes:
-        ------------
-        -   `self.original_env_class`: Stores the class of the provided environment.
-        -   `self.original_env_kwargs`: Stores the parameters of the original environment.
-        -   `self.env`: A vectorized environment (SubprocVecEnv) for parallel training.
-        -   `self.model`: The PPO model instance from stable-baselines3, configured
-            with the specified hyperparameters.
-        -   `self.training_metrics`: Initialized to None, will store training metrics later.
+        Initialize PPO agent with given environment and parameters.
+        Args:
+            env:
+                The environment instance (should be Gym-compatible)
+            n_envs:
+                Number of environments to run in parallel (default: 1)
+            model_name:
+                Name of the model (default: 'ppo')
+            policy:
+                Policy type for PPO (default: 'MlpPolicy')
+            n_steps:
+                Number of steps to run for each environment per update (default: 2048)
+            batch_size:
+                Minibatch size for PPO (default: 64)
+            n_epochs:
+                Number of epochs when optimizing the surrogate loss (default: 10)
+            learning_rate:
+                Learning rate (default: 0.0003)
+            gamma:
+                Discount factor (default: 0.99)
+            gae_lambda:
+                Factor for trade-off of bias vs variance for GAE (default: 0.95)
+            clip_range:
+                Clipping parameter for PPO (default: 0.2)
+            seed:
+                Random seed for reproducibility (default: 0)
         """
-        self.original_env_class = type(env)
-        env_params = {
-            "df_returns": env.df_returns,
-            "df_prices": env.df_prices,
-            "df_vola": env.df_vola,
-            "window_size": env.window_size,
-            "transaction_cost": env.transaction_cost,
-            "initial_balance": env.initial_balance,
-            "reward_scaling": env.reward_scaling,
-        }
-        if hasattr(env, "eta"):
-            env_params["eta"] = env.eta
-        self.original_env_kwargs = env_params
 
-        def make_env_closure(rank: int, seed: int = 0, env_class=None, env_kwargs=None):
+        def make_env(rank: int, seed: int = 0):
+            """
+            Utility function for multiprocessed env.
+
+            :param rank: (int) index of the subprocess
+            :param seed: (int) the initial seed for RNG
+            """
+
             def _init():
-                if env_class is None:
-                    raise ValueError("env_class must be provided to make_env_closure")
-                current_env_kwargs = {**env_kwargs}
-                new_env = env_class(**current_env_kwargs)
-                new_env.reset(seed=seed + rank)
+                # create new env from the same class as the given env
+                new_env = type(env)(
+                    returns_df=env.returns_df,
+                    prices_df=env.prices_df,
+                    vol_df=env.vol_df,
+                    window_size=env.window_size,
+                    transaction_cost=env.transaction_cost,
+                    initial_balance=env.initial_balance,
+                    reward_scaling=env.reward_scaling,
+                    eta=env.eta,
+                )
+                # use a seed for reproducibility
+                # Important: use a different seed for each environment
+                # otherwise they would generate the same experiences
+                new_env.reset(seed=seed+rank)
                 return new_env
 
             set_random_seed(seed)
             return _init
 
+        # Create vectorized environment with proper closures
         self.env = SubprocVecEnv(
-            [
-                make_env_closure(
-                    i, seed, self.original_env_class, self.original_env_kwargs
-                )
-                for i in range(n_envs)
-            ],
-            start_method="fork",
+            [make_env(i, seed) for i in range(n_envs)],
+            start_method="fork"
         )
-
-        if policy_kwargs is None:
-            policy_kwargs = dict(
-                activation_fn=torch.nn.Tanh, net_arch=[64, 64], log_std_init=-1.0
-            )
-
-        if "log_std_init" in policy_kwargs:
-            policy_kwargs["log_std_init"] = float(policy_kwargs["log_std_init"])
 
         self.model = PPO(
             policy,
@@ -135,173 +102,245 @@ class DRLAgent:
             gamma=gamma,
             gae_lambda=gae_lambda,
             clip_range=clip_range,
-            policy_kwargs=policy_kwargs,
-            seed=seed,
-            tensorboard_log=tensorboard_log,
         )
         self.training_metrics = None
 
-    def train(self, total_timesteps: int = 100_000, tb_experiment_name: str = "ppo"):
+    def train(self, total_timesteps: int = 100_000, seed: Optional[int] = None):
         """
-        Trains the PPO model.
-
-        This method initiates the training process for the PPO model using the
-        specified number of timesteps. It also handles TensorBoard logging for
-        monitoring training progress.
-
-        Parameters:
-        ----------
-        total_timesteps : int, optional
-            The total number of samples (env steps) to train on. Default is 100,000.
-        tb_experiment_name : str, optional
-            The name of the experiment for TensorBoard logging. Default is "ppo".
-        tb_experiment_name : str, optional
+        Train the PPO agent.
+        Args:
+            total_timesteps: Number of timesteps to train
+            seed: Random seed for reproducibility
         """
-        # Create a callback to log portfolio metrics
-        callback = PortfolioLogCallback(self.env)
+        if seed is not None:
+            self.model.set_random_seed(seed)
 
+        # Train the model
         self.model.learn(
             total_timesteps=total_timesteps,
             progress_bar=True,
-            tb_log_name=tb_experiment_name,
-            callback=callback,
         )
-        print(f"\nTraining complete. Trained for {total_timesteps} timesteps.")
-        print(
-            f"TensorBoard logs for experiment '{tb_experiment_name}' saved in directory: {self.model.tensorboard_log}"
-        )
+
+        # Get the final portfolio value from the environment
+        obs = self.env.reset()[0]
+        done = False
+        # Track portfolio values from first environment only
+        portfolio_values = []
+        # Track final portfolio values from all environments
+        final_portfolio_values = []
+
+        while not done:
+            action, _ = self.model.predict(obs, deterministic=True)
+            # not that there is no truncated output !!!
+            obs, reward, terminated, info = self.env.step(action)
+            done = terminated.any()  # no truncated
+
+            # Handle info as a list of dictionaries for multiple environments
+            if isinstance(info, list):
+                # Track portfolio values from first environment only
+                if "portfolio_value" in info[0]:
+                    portfolio_values.append(info[0]["portfolio_value"])
+                # Store final portfolio values from all environments
+                for env_info in info:
+                    if "portfolio_value" in env_info:
+                        final_portfolio_values.append(env_info["portfolio_value"])
+            else:
+                if "portfolio_value" in info:
+                    portfolio_values.append(info["portfolio_value"])
+                    final_portfolio_values.append(info["portfolio_value"])
+
+        # Calculate and store training metrics
+        if len(portfolio_values) > 0:
+            # Calculate metrics using first environment's portfolio values
+            self.training_metrics = self.calc_metrics(portfolio_values)
+
+            # Print training summary
+            print("\nTraining Summary:")
+            print(f"Final Portfolio Value (First Env): ${portfolio_values[-1]:,.2f}")
+            if len(final_portfolio_values) > 1:
+                print(
+                    f"Average Final Portfolio Value (All Envs): ${np.mean(final_portfolio_values):,.2f}"
+                )
+                print(
+                    f"Std Final Portfolio Value (All Envs): ${np.std(final_portfolio_values):,.2f}"
+                )
+            print("\nPerformance Metrics (First Env):")
+            for metric, value in self.training_metrics.items():
+                if isinstance(value, float):
+                    print(f"{metric}: {value:.4f}")
+                else:
+                    print(f"{metric}: {value}")
 
     def predict(self, obs: np.ndarray, deterministic: bool = True):
         """
-        Predicts actions based on an observation.
-
-        Using the trained PPO model to predict the next action(s)
-        given the current observation(s) from the environment.
+        Get action from the trained agent.
+        Args:
+            obs: Observation/state
+            deterministic: Whether to use deterministic actions
+        Returns:
+            Action selected by the agent
         """
         action, _ = self.model.predict(obs, deterministic=deterministic)
         return action
 
     def save(self, path: str):
         """
-        Saves the trained PPO model.
-
-        This method saves the current state of the PPO model to a file at the
-        specified path. This allows for later reloading and reuse of the trained
-        model.
-
-        Parameters:
-        ----------
-        path : str
-            The file path where the model should be saved. Typically, this is a
-            `.zip` file for stable-baselines3 models.
+        Save the trained model to the given path.
         """
         self.model.save(path)
 
-    def load(self, path: str, env=None):
+    def load(self, path: str):
         """
-        Loads a pre-trained PPO model.
-
-        This method loads a PPO model from a file specified by the path.
-        It allows for setting a new environment for the loaded model or
-        continuing with the agent's current environment.
+        Load a trained model from the given path.
         """
-        target_env = env if env is not None else self.env
-        self.model = PPO.load(path, env=target_env)
+        self.model = PPO.load(path, env=self.env)
 
-    def evaluate(self, eval_env, n_eval_episodes: int = 1, deterministic: bool = True):
+    def evaluate(self, env, n_episodes: int = 10):
         """
-        Evaluates the agent's performance on a given environment.
-
-        This method runs the agent for a specified number of episodes on the
-        evaluation environment (`eval_env`). It collects rewards and uses the
-        environment's portfolio instance to calculate performance metrics.
-
-        Parameters:
-        ----------
-        eval_env : object
-            The environment on which to evaluate the agent. This should be
-            compatible with the agent's model (i.e., have the same observation
-            and action spaces).
-        n_eval_episodes : int, optional
-            The number of episodes to run for evaluation. Default is 1.
-        deterministic : bool, optional
-            Whether to use deterministic actions during evaluation. If True, the
-            model selects the action with the highest probability. If False,
-            actions are sampled. Default is True.
-
+        Evaluate the agent on the environment with detailed metrics.
+        Args:
+            env: The environment to evaluate on
+            n_episodes: Number of episodes to run
         Returns:
-        -------
-        Dict[str, Any | float]
-            A dictionary containing various evaluation metrics. This includes:
-            -   `mean_reward`: Average reward per episode.
-            -   `std_reward`: Standard deviation of rewards per episode.
-            -   `n_eval_episodes`: Number of evaluation episodes.
-            -   `final_portfolio_value_first_episode`: Portfolio value at the end
-                of the first evaluation episode.
-            -   Other metrics calculated by the Portfolio's calc_metrics
-                method based on the portfolio values of the first episode.
+            Dictionary containing evaluation metrics
         """
-        all_episode_rewards = []
+        all_portfolio_values = []
+        rewards = []
 
-        for episode in range(n_eval_episodes):
-            obs, info = eval_env.reset()
+        for episode in range(n_episodes):
+            obs, info = env.reset()
             done = False
-            episode_total_reward = 0.0
+            total_reward = 0.0
+            episode_portfolio_values = []
 
             while not done:
-                action, _ = self.model.predict(obs, deterministic=deterministic)
-                obs, reward, terminated, truncated, info = eval_env.step(action)
+                action = self.predict(obs)
+                obs, reward, terminated, truncated, info = env.step(action)
+                total_reward += reward
                 done = terminated or truncated
-                episode_total_reward += reward
 
-            all_episode_rewards.append(episode_total_reward)
+                if "portfolio_value" in info:
+                    episode_portfolio_values.append(info["portfolio_value"])
 
-        mean_reward = (
-            np.mean(all_episode_rewards) if len(all_episode_rewards) > 0 else np.nan
+            rewards.append(total_reward)
+            all_portfolio_values.extend(episode_portfolio_values)
+
+        # Calculate evaluation metrics using agent's method
+        eval_metrics = self.calc_metrics(all_portfolio_values)
+        eval_metrics["Average Reward"] = np.mean(rewards)
+
+        # Print evaluation summary
+        print("\nEvaluation Summary:")
+        print(f"Final Portfolio Value: ${all_portfolio_values[-1]:,.2f}")
+        print(f"Average Reward: {np.mean(rewards):.4f}")
+        print("\nPerformance Metrics:")
+        for metric, value in eval_metrics.items():
+            if isinstance(value, float):
+                print(f"{metric}: {value:.4f}")
+            else:
+                print(f"{metric}: {value}")
+
+        return eval_metrics
+
+    def calc_metrics(
+        self,
+        portfolio_values: Union[List[float], np.ndarray, pd.Series],
+        weights_history: Optional[List[Dict[str, float]]] = None,
+        risk_free_rate: float = 0.02,
+    ) -> Dict[str, Any | float]:
+        """
+        Compute a comprehensive set of portfolio performance metrics from a time series of portfolio values.
+        
+        Parameters:
+            portfolio_values (list, np.ndarray, or pd.Series): Sequence of portfolio values over time.
+            weights_history (list of dict, optional): Portfolio weights at each time step, if available.
+            risk_free_rate (float, optional): Annual risk-free rate used for excess return calculations (default is 0.02).
+        
+        Returns:
+            dict: Dictionary containing annual return, cumulative returns, annual volatility, Sharpe ratio, Calmar ratio, stability, maximum drawdown, Omega ratio, Sortino ratio, skewness, kurtosis, tail ratio, daily value at risk, and portfolio turnover.
+        """
+        # Convert to numpy array if needed
+        if isinstance(portfolio_values, (list, pd.Series)):
+            portfolio_values = np.array(portfolio_values)
+
+        # Calculate daily returns
+        daily_returns = np.diff(portfolio_values) / portfolio_values[:-1]
+
+        # Annual return (assuming 252 trading days)
+        annual_return = (portfolio_values[-1] / portfolio_values[0]) ** (
+            252 / len(portfolio_values)
+        ) - 1
+
+        # Cumulative returns
+        cumulative_return = (portfolio_values[-1] / portfolio_values[0]) - 1
+
+        # Annual volatility
+        annual_volatility = np.std(daily_returns) * np.sqrt(252)
+
+        # Sharpe ratio
+        excess_returns = daily_returns - risk_free_rate / 252
+        sharpe_ratio = np.sqrt(252) * np.mean(excess_returns) / np.std(daily_returns)
+
+        # Maximum drawdown
+        rolling_max = np.maximum.accumulate(portfolio_values)
+        drawdowns = (portfolio_values - rolling_max) / rolling_max
+        max_drawdown = np.min(drawdowns)
+
+        # Calmar ratio
+        calmar_ratio = annual_return / abs(max_drawdown) if max_drawdown != 0 else 0
+
+        # Sortino ratio (using negative returns only)
+        negative_returns = daily_returns[daily_returns < 0]
+        sortino_ratio = (
+            np.sqrt(252) * np.mean(excess_returns) / np.std(negative_returns)
+            if len(negative_returns) > 0
+            else 0
         )
-        std_reward = (
-            np.std(all_episode_rewards) if len(all_episode_rewards) > 0 else np.nan
+
+        # Omega ratio
+        threshold = risk_free_rate / 252
+        positive_returns = daily_returns[daily_returns > threshold]
+        negative_returns = daily_returns[daily_returns <= threshold]
+        omega_ratio = (
+            np.sum(positive_returns - threshold)
+            / abs(np.sum(negative_returns - threshold))
+            if len(negative_returns) > 0
+            else float("inf")
         )
 
-        eval_metrics = {
-            "n_eval_episodes": n_eval_episodes,
-            "mean_reward": mean_reward,
-            "std_reward": std_reward,
+        # Skewness and Kurtosis
+        skew = pd.Series(daily_returns).skew()
+        kurtosis = pd.Series(daily_returns).kurtosis()
+
+        # Tail ratio (95th percentile / 5th percentile)
+        tail_ratio = np.percentile(daily_returns, 95) / abs(
+            np.percentile(daily_returns, 5)
+        )
+
+        # Value at Risk (95%)
+        var = np.percentile(daily_returns, 5)
+
+        # Portfolio turnover (average daily change in weights)
+        daily_change = np.mean(
+            np.abs(np.diff(portfolio_values) / portfolio_values[:-1])
+        )
+
+        # Stability (inverse of volatility)
+        stability = 1 / (1 + annual_volatility)
+
+        return {
+            "Annual return": annual_return,
+            "Cumulative returns": cumulative_return,
+            "Annual volatility": annual_volatility,
+            "Sharpe ratio": sharpe_ratio,
+            "Calmar ratio": calmar_ratio,
+            "Stability": stability,
+            "Max drawdown": max_drawdown,
+            "Omega ratio": omega_ratio,
+            "Sortino ratio": sortino_ratio,
+            "Skew": skew,
+            "Kurtosis": kurtosis,
+            "Tail ratio": tail_ratio,
+            "Daily value at risk": var,
+            "Portfolio turnover": daily_change,
         }
-
-        if n_eval_episodes > 0:
-            # Get the portfolio instance from the environment
-            portfolio = eval_env.portfolio if hasattr(eval_env, "portfolio") else None
-
-            if portfolio is not None:
-                # Use the portfolio's metrics directly
-                portfolio_metrics = portfolio.calc_metrics()
-                eval_metrics.update(portfolio_metrics)
-                eval_metrics["final_portfolio_value_first_episode"] = round(
-                    portfolio.current_balance
-                )
-
-        return eval_metrics, portfolio
-
-
-class PortfolioLogCallback(BaseCallback):
-    def __init__(self, train_env: VecEnv, verbose: int = 0):
-        super(PortfolioLogCallback, self).__init__(verbose)
-        self.train_env = train_env
-
-    def _on_step(self) -> bool:
-        if self.n_calls % self.model.n_steps == 0:  # Log at the same frequency as other logs
-            # Get portfolio from the first environment (assuming all are similar)
-            # Access the underlying environment of the VecEnv
-            portfolios = self.train_env.get_attr("portfolio")
-            if portfolios and len(portfolios) > 0:
-                portfolio = portfolios[0] # Using the first env's portfolio for logging
-                if portfolio and hasattr(portfolio, 'calc_metrics') and hasattr(portfolio, 'history') and len(portfolio.history) > 0:
-                    metrics = portfolio.calc_metrics()
-                    for key, value in metrics.items():
-                        # Ensure value is a scalar and not NaN or Inf before logging
-                        if isinstance(value, (int, float)) and not (np.isnan(value) or np.isinf(value)):
-                            self.logger.record(f"portfolio/{key.replace(' ', '_').lower()}", value)
-                        elif isinstance(value, np.number) and not (np.isnan(value) or np.isinf(value)): # Handles numpy numeric types
-                            self.logger.record(f"portfolio/{key.replace(' ', '_').lower()}", float(value))
-        return True
