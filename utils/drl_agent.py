@@ -2,8 +2,9 @@ import torch
 import numpy as np
 
 from stable_baselines3 import PPO
-from stable_baselines3.common.vec_env import SubprocVecEnv
+from stable_baselines3.common.vec_env import SubprocVecEnv, VecEnv
 from stable_baselines3.common.utils import set_random_seed
+from stable_baselines3.common.callbacks import BaseCallback
 from typing import Optional, Dict, Union, Any, Callable
 
 
@@ -156,10 +157,14 @@ class DRLAgent:
             The name of the experiment for TensorBoard logging. Default is "ppo".
         tb_experiment_name : str, optional
         """
+        # Create a callback to log portfolio metrics
+        callback = PortfolioLogCallback(self.env)
+
         self.model.learn(
             total_timesteps=total_timesteps,
             progress_bar=True,
             tb_log_name=tb_experiment_name,
+            callback=callback,
         )
         print(f"\nTraining complete. Trained for {total_timesteps} timesteps.")
         print(
@@ -277,3 +282,26 @@ class DRLAgent:
                 )
 
         return eval_metrics, portfolio
+
+
+class PortfolioLogCallback(BaseCallback):
+    def __init__(self, train_env: VecEnv, verbose: int = 0):
+        super(PortfolioLogCallback, self).__init__(verbose)
+        self.train_env = train_env
+
+    def _on_step(self) -> bool:
+        if self.n_calls % self.model.n_steps == 0:  # Log at the same frequency as other logs
+            # Get portfolio from the first environment (assuming all are similar)
+            # Access the underlying environment of the VecEnv
+            portfolios = self.train_env.get_attr("portfolio")
+            if portfolios and len(portfolios) > 0:
+                portfolio = portfolios[0] # Using the first env's portfolio for logging
+                if portfolio and hasattr(portfolio, 'calc_metrics') and hasattr(portfolio, 'history') and len(portfolio.history) > 0:
+                    metrics = portfolio.calc_metrics()
+                    for key, value in metrics.items():
+                        # Ensure value is a scalar and not NaN or Inf before logging
+                        if isinstance(value, (int, float)) and not (np.isnan(value) or np.isinf(value)):
+                            self.logger.record(f"portfolio/{key.replace(' ', '_').lower()}", value)
+                        elif isinstance(value, np.number) and not (np.isnan(value) or np.isinf(value)): # Handles numpy numeric types
+                            self.logger.record(f"portfolio/{key.replace(' ', '_').lower()}", float(value))
+        return True
