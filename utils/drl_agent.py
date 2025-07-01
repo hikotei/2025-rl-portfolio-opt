@@ -261,6 +261,12 @@ class DRLAgent:
             np.std(all_episode_rewards) if len(all_episode_rewards) > 0 else np.nan
         )
 
+        # TODO
+        # the mean and std deviation of reward should not be calc for single agent
+        # its supposed to be calc across multiple / all agents in the current window
+        # so this should be moved to drl_train.py 
+        # where backtest_agent and process_window are called
+        
         eval_metrics = {
             "n_eval_episodes": n_eval_episodes,
             "mean_reward": mean_reward,

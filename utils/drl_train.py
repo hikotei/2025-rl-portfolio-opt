@@ -232,6 +232,10 @@ def train_single_agent(
     current_val_reward = val_metrics.get("mean_reward", -np.inf)
     print(f"    Validation Mean Reward: {current_val_reward:.4f}")
 
+    # TODO
+    # add more information to the agent name
+    # ie window index, train years etc
+
     # Save agent
     current_agent_model_name = (
         f"agent_seed{agent_seed}_valrew{current_val_reward:.2f}.zip"
@@ -419,7 +423,9 @@ def training_pipeline(
         previous_best_agent_path = None
         if drl_config.use_previous_best_seed and best_agent_paths_per_window:
             previous_best_agent_path = best_agent_paths_per_window[-1]
-            print(f"  Using previous best agent: {os.path.basename(previous_best_agent_path)}")
+            print(
+                f"  Using previous best agent: {os.path.basename(previous_best_agent_path)}"
+            )
         else:
             print("  Starting with fresh random initialization")
 

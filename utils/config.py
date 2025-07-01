@@ -37,6 +37,7 @@ class DRLConfig:
     # Paths
     model_save_dir: str = "models"
     tensorboard_log_dir: str = "logs"
+    data_dir: str = "data"
 
     policy_kwargs = dict(
         activation_fn=torch.nn.Tanh,

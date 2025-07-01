@@ -131,14 +131,6 @@ class PortfolioEnv(gym.Env):
         Returns:
             observation, reward, terminated, truncated, info
         """
-        # # Handle vectorized actions - each environment should get its corresponding action
-        # if len(action.shape) == 2:
-        #     # Get the action for this specific environment
-        #     action = action[0]  # This environment's action
-
-        # # Convert single float to array if needed
-        # if isinstance(action, (np.float32, float)):
-        #     action = np.array([action] * self.n_assets, dtype=np.float32)
 
         # Check for NaN in action
         if np.isnan(action).any():
@@ -231,7 +223,14 @@ class PortfolioEnv(gym.Env):
         observation[:n_assets, 1 : 1 + self.window_size] = returns_window.T
 
         # Fill 3 values after w_c in last row with vol features
-        vol_features = self.df_vola.iloc[self.current_step].values  # shape: (3,)
+        try: 
+            vol_features = self.df_vola.iloc[self.current_step].values  # shape: (3,)
+        except Exception as e:
+            # print(e)
+            # print("vola shape: ", self.df_vola.shape)
+            # print("current step: ", self.current_step)
+            # default to 0
+            vol_features = np.zeros(3)
         observation[-1, 1:4] = vol_features
 
         # Check for NaN values
