@@ -180,8 +180,7 @@ def train_single_agent(
     env_val: PortfolioEnv,
     drl_config: DRLConfig,
     agent_seed: int,
-    prev_best_path: Optional[str] = None,
-    window_idx: int = 0,
+    previous_best_agent_path: Optional[str] = None,
 ) -> Tuple[Dict[str, float], str]:
     """
     Train a single agent and return its metrics and path.
@@ -191,15 +190,11 @@ def train_single_agent(
         env_val: Validation environment
         drl_config: Training configuration
         agent_seed: Random seed for the agent
-        prev_best_path: Path to previous best agent for seed policy / warm start
-        window_idx: Index of the current window (for file naming)
+        previous_best_agent_path: Path to previous best agent for seeding
 
     Returns:
         Tuple of (validation metrics, agent save path)
     """
-    # Calculate test start year for this window
-    test_start_year = drl_config.base_start_year + window_idx + 6  # 5 train + 1 val
-
     # Create agent
     agent = DRLAgent(
         env=env_train,
@@ -216,13 +211,11 @@ def train_single_agent(
         tensorboard_log=drl_config.tensorboard_log_dir,
     )
 
-    # Policy warm start if prev_best_path is provided
-    if prev_best_path is not None:
-        print(f"    Warming up agent policy from: {prev_best_path}")
-        # create temporary agent to load policy weights
-        tmp_agent = DRLAgent(env=env_train)
-        tmp_agent.load(prev_best_path, env=None)
-        agent.model.policy.load_state_dict(tmp_agent.model.policy.state_dict())
+    # Load previous best agent if available
+    if previous_best_agent_path is not None:
+        print(f"    Seeding agent from: {previous_best_agent_path}")
+        agent.load(path=previous_best_agent_path, env=None)
+        agent.model.set_random_seed(agent_seed)
 
     # Train agent
     print(
@@ -230,7 +223,7 @@ def train_single_agent(
     )
     agent.train(
         total_timesteps=drl_config.total_timesteps_per_round,
-        tb_experiment_name=f"PPO_Seed={agent_seed}",
+        tb_experiment_name=f"PPO_Seed{agent_seed}",
     )
 
     # Evaluate agent
@@ -239,13 +232,21 @@ def train_single_agent(
     current_val_reward = val_metrics.get("mean_reward", -np.inf)
     print(f"    Validation Mean Reward: {current_val_reward:.4f}")
 
-    # Save agent
-    current_agent_model_name = f"agent_window={window_idx}_seed={agent_seed}_test={test_start_year}_valrew={current_val_reward:.2f}.zip"
-    agent_save_path = os.path.join(drl_config.model_save_dir, current_agent_model_name)
-    agent.save(agent_save_path)
-    print(f"    Agent saved to: {agent_save_path}")
+    # TODO
+    # add more information to the agent name
+    # ie window index, train years etc
 
-    return val_metrics, agent_save_path
+    # Save agent
+    current_agent_model_name = (
+        f"agent_seed{agent_seed}_valrew{current_val_reward:.2f}.zip"
+    )
+    current_agent_save_path = os.path.join(
+        drl_config.model_save_dir, current_agent_model_name
+    )
+    agent.save(current_agent_save_path)
+    print(f"    Agent saved to: {current_agent_save_path}")
+
+    return val_metrics, current_agent_save_path
 
 
 def backtest_agent(
@@ -297,7 +298,7 @@ def process_window(
         Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame],
     ],
     drl_config: DRLConfig,
-    prev_best_path: Optional[str] = None,
+    previous_best_agent_path: Optional[str] = None,
 ) -> Tuple[Optional[str], Dict[str, Any]]:
     """
     Process a single training window.
@@ -306,7 +307,7 @@ def process_window(
         window_idx: Index of the current window
         data_slices: Tuple of (train_data, val_data, test_data)
         drl_config: Training configuration
-        prev_best_path: Path to previous best agent for seeding
+        previous_best_agent_path: Path to previous best agent for seeding
 
     Returns:
         Tuple of (best_agent_path, backtest_results)
@@ -339,7 +340,7 @@ def process_window(
     best_agent_path = None
 
     for i_agent in range(drl_config.agents_per_window):
-        agent_seed = np.random.randint(1_000, 2**10-1) # avoid low integer seeds
+        agent_seed = (window_idx * drl_config.agents_per_window) + i_agent
         print(
             f"  Training Agent {i_agent + 1}/{drl_config.agents_per_window} with seed {agent_seed}..."
         )
@@ -349,8 +350,7 @@ def process_window(
             env_val=env_val,
             drl_config=drl_config,
             agent_seed=agent_seed,
-            prev_best_path=prev_best_path,
-            window_idx=window_idx,
+            previous_best_agent_path=previous_best_agent_path,
         )
 
         current_val_reward = val_metrics.get("mean_reward", -np.inf)
@@ -390,7 +390,7 @@ def training_pipeline(
     """
 
     all_backtest_results = []
-    best_agent_paths = []
+    best_agent_paths_per_window = []
     all_portfolios = {}
 
     os.makedirs(drl_config.model_save_dir, exist_ok=True)
@@ -420,22 +420,23 @@ def training_pipeline(
         )
 
         # Process window
-        prev_best_path = None
-        if drl_config.seed_policy and best_agent_paths:
-            prev_best_path = best_agent_paths[-1]
-            print(f"  Using previous best agent: {os.path.basename(prev_best_path)}")
+        previous_best_agent_path = None
+        if drl_config.use_previous_best_seed and best_agent_paths_per_window:
+            previous_best_agent_path = best_agent_paths_per_window[-1]
+            print(
+                f"  Using previous best agent: {os.path.basename(previous_best_agent_path)}"
+            )
         else:
             print("  Starting with fresh random initialization")
-            prev_best_path = None
 
         best_agent_path, window_results, backtest_portfolio = process_window(
             window_idx=idx_window,
             data_slices=data_slices,
             drl_config=drl_config,
-            prev_best_path=prev_best_path,
+            previous_best_agent_path=previous_best_agent_path,
         )
 
-        best_agent_paths.append(best_agent_path)
+        best_agent_paths_per_window.append(best_agent_path)
         all_backtest_results.append(
             {
                 "window": idx_window + 1,
