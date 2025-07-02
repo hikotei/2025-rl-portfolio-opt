@@ -254,22 +254,18 @@ class DRLAgent:
 
             all_episode_rewards.append(episode_total_reward)
 
-        mean_reward = (
-            np.mean(all_episode_rewards) if len(all_episode_rewards) > 0 else np.nan
-        )
-        std_reward = (
-            np.std(all_episode_rewards) if len(all_episode_rewards) > 0 else np.nan
-        )
-
         # TODO
         # the mean and std deviation of reward should not be calc for single agent
         # its supposed to be calc across multiple / all agents in the current window
-        # so this should be moved to drl_train.py 
+        # so this should be moved to drl_train.py
         # where backtest_agent and process_window are called
-        
+
+        mean_reward = np.mean(all_episode_rewards) if all_episode_rewards else np.nan
+        std_reward = np.std(all_episode_rewards) if all_episode_rewards else np.nan
+
         eval_metrics = {
             "n_eval_episodes": n_eval_episodes,
-            "mean_reward": mean_reward,
+            "val_reward": mean_reward,
             "std_reward": std_reward,
         }
 
@@ -294,18 +290,34 @@ class PortfolioLogCallback(BaseCallback):
         self.train_env = train_env
 
     def _on_step(self) -> bool:
-        if self.n_calls % self.model.n_steps == 0:  # Log at the same frequency as other logs
+        if (
+            self.n_calls % self.model.n_steps == 0
+        ):  # Log at the same frequency as other logs
             # Get portfolio from the first environment (assuming all are similar)
             # Access the underlying environment of the VecEnv
             portfolios = self.train_env.get_attr("portfolio")
             if portfolios and len(portfolios) > 0:
-                portfolio = portfolios[0] # Using the first env's portfolio for logging
-                if portfolio and hasattr(portfolio, 'calc_metrics') and hasattr(portfolio, 'history') and len(portfolio.history) > 0:
+                portfolio = portfolios[0]  # Using the first env's portfolio for logging
+                if (
+                    portfolio
+                    and hasattr(portfolio, "calc_metrics")
+                    and hasattr(portfolio, "history")
+                    and len(portfolio.history) > 0
+                ):
                     metrics = portfolio.calc_metrics()
                     for key, value in metrics.items():
                         # Ensure value is a scalar and not NaN or Inf before logging
-                        if isinstance(value, (int, float)) and not (np.isnan(value) or np.isinf(value)):
-                            self.logger.record(f"portfolio/{key.replace(' ', '_').lower()}", value)
-                        elif isinstance(value, np.number) and not (np.isnan(value) or np.isinf(value)): # Handles numpy numeric types
-                            self.logger.record(f"portfolio/{key.replace(' ', '_').lower()}", float(value))
+                        if isinstance(value, (int, float)) and not (
+                            np.isnan(value) or np.isinf(value)
+                        ):
+                            self.logger.record(
+                                f"portfolio/{key.replace(' ', '_').lower()}", value
+                            )
+                        elif isinstance(value, np.number) and not (
+                            np.isnan(value) or np.isinf(value)
+                        ):  # Handles numpy numeric types
+                            self.logger.record(
+                                f"portfolio/{key.replace(' ', '_').lower()}",
+                                float(value),
+                            )
         return True

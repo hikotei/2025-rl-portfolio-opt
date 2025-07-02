@@ -21,7 +21,7 @@ class DRLConfig:
 
     # Training parameters
     n_envs: int = 10
-    total_timesteps_per_round: int = 100_000
+    total_timesteps_per_round: int = 7_500_000
     n_steps_per_env: int = 252 * 3
     batch_size: int = 1260
     n_epochs: int = 16
@@ -35,9 +35,13 @@ class DRLConfig:
     final_lr: float = 1e-5
 
     # Paths
-    model_save_dir: str = "models"
-    tensorboard_log_dir: str = "logs"
-    data_dir: str = "data"
+    # include data source for logging
+    data_dir: str = None 
+    # these are for saving models and logs
+    model_save_dir: str = None
+    tensorboard_log_dir: str = None
+    # optional for policy warm start
+    prev_best_model_dir: str = None
 
     policy_kwargs = dict(
         activation_fn=torch.nn.Tanh,

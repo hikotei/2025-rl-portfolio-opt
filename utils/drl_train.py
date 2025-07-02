@@ -1,6 +1,7 @@
 import os
 import pandas as pd
 import numpy as np
+import torch
 
 from typing import Callable, Dict, List, Optional, Tuple, Any
 
@@ -182,6 +183,7 @@ def train_single_agent(
     agent_seed: int,
     prev_best_path: Optional[str] = None,
     window_idx: int = 0,
+    agent_idx: int = 0,
 ) -> Tuple[Dict[str, float], str]:
     """
     Train a single agent and return its metrics and path.
@@ -195,7 +197,7 @@ def train_single_agent(
         window_idx: Index of the current window (for file naming)
 
     Returns:
-        Tuple of (validation metrics, agent save path)
+        Tuple of (current_val_reward, agent save path)
     """
     # Calculate test start year for this window
     test_start_year = drl_config.base_start_year + window_idx + 6  # 5 train + 1 val
@@ -222,12 +224,31 @@ def train_single_agent(
         # create temporary agent to load policy weights
         tmp_agent = DRLAgent(env=env_train)
         tmp_agent.load(prev_best_path, env=None)
-        agent.model.policy.load_state_dict(tmp_agent.model.policy.state_dict())
+
+        # FULL WARM START using exact same weights
+        # BUT this leads to the problem that all agents 
+        # will converge to same policy using the same data
+        # agent.model.policy.load_state_dict(tmp_agent.model.policy.state_dict())
+        
+        # Load the previous weights and add small noise for diversity
+        prev_state_dict = tmp_agent.model.policy.state_dict()
+        new_state_dict = {}
+        
+        # Use agent_seed for reproducible noise generation
+        torch.manual_seed(agent_seed)
+        
+        for key, value in prev_state_dict.items():
+            if 'weight' in key:  # Only add noise to weight parameters, not biases
+                # Add small random noise 
+                noise_scale = 0.03
+                noise = torch.randn_like(value) * noise_scale * torch.std(value)
+                new_state_dict[key] = value + noise
+            else:
+                new_state_dict[key] = value
+        
+        agent.model.policy.load_state_dict(new_state_dict)
 
     # Train agent
-    print(
-        f"    Starting training for {drl_config.total_timesteps_per_round} timesteps..."
-    )
     agent.train(
         total_timesteps=drl_config.total_timesteps_per_round,
         tb_experiment_name=f"PPO_Seed={agent_seed}",
@@ -235,17 +256,17 @@ def train_single_agent(
 
     # Evaluate agent
     print("    Evaluating agent on validation set...")
-    val_metrics, val_portfolio = agent.evaluate(eval_env=env_val, n_eval_episodes=1)
-    current_val_reward = val_metrics.get("mean_reward", -np.inf)
-    print(f"    Validation Mean Reward: {current_val_reward:.4f}")
+    val_metrics, _ = agent.evaluate(eval_env=env_val, n_eval_episodes=1)
+    current_val_reward = val_metrics.get("val_reward", -np.inf)
+    print(f"    Validation Reward: {current_val_reward:.8f}")
 
     # Save agent
-    current_agent_model_name = f"agent_window={window_idx}_seed={agent_seed}_test={test_start_year}_valrew={current_val_reward:.2f}.zip"
+    current_agent_model_name = f"agent_{window_idx + 1}-{agent_idx + 1}_seed={agent_seed}_test={test_start_year}_valrew={current_val_reward:.2f}.zip"
     agent_save_path = os.path.join(drl_config.model_save_dir, current_agent_model_name)
     agent.save(agent_save_path)
-    print(f"    Agent saved to: {agent_save_path}")
+    print(f"    Agent saved to: {agent_save_path}" + "\n")
 
-    return val_metrics, agent_save_path
+    return current_val_reward, agent_save_path
 
 
 def backtest_agent(
@@ -298,7 +319,7 @@ def process_window(
     ],
     drl_config: DRLConfig,
     prev_best_path: Optional[str] = None,
-) -> Tuple[Optional[str], Dict[str, Any]]:
+):
     """
     Process a single training window.
 
@@ -309,7 +330,7 @@ def process_window(
         prev_best_path: Path to previous best agent for seeding
 
     Returns:
-        Tuple of (best_agent_path, backtest_results)
+        Tuple of (best_agent_path, backtest_results, backtest_portfolio, val_rewards_stats)
     """
     train_data, val_data, test_data = data_slices
     train_prices, train_returns, train_vola = train_data
@@ -323,7 +344,7 @@ def process_window(
         or len(test_data[0]) < min_data_len
     ):
         print(f"SKIPPING Window {window_idx + 1} due to insufficient data length.")
-        return None, {"status": "skipped_insufficient_data", "metrics": {}}
+        return None, {"status": "skipped_insufficient_data", "metrics": {}}, None, {"val_reward_mean": None, "val_reward_std": None}
 
     # Create environments
     env_train_config = create_env_config(
@@ -337,29 +358,41 @@ def process_window(
     # Train multiple agents
     best_val_reward = -np.inf
     best_agent_path = None
+    prev_seed = None
+    val_rewards = []
 
     for i_agent in range(drl_config.agents_per_window):
-        agent_seed = np.random.randint(1_000, 2**10-1) # avoid low integer seeds
+        agent_seed = np.random.randint(1_000, 2**16 - 1)  # avoid low integer seeds
+        # avoid duplicate seeds
+        if agent_seed == prev_seed:
+            agent_seed += np.random.randint(1_000, 2**12)
+        prev_seed = agent_seed
+
         print(
             f"  Training Agent {i_agent + 1}/{drl_config.agents_per_window} with seed {agent_seed}..."
         )
 
-        val_metrics, agent_path = train_single_agent(
+        current_val_reward, agent_path = train_single_agent(
             env_train=env_train,
             env_val=env_val,
             drl_config=drl_config,
             agent_seed=agent_seed,
             prev_best_path=prev_best_path,
             window_idx=window_idx,
+            agent_idx=i_agent,
         )
 
-        current_val_reward = val_metrics.get("mean_reward", -np.inf)
+        val_rewards.append(current_val_reward)
         if current_val_reward > best_val_reward:
             best_val_reward = current_val_reward
             best_agent_path = agent_path
 
-    if best_agent_path is None:
-        return None, {"status": "no_best_agent", "metrics": {}}
+    print(f"best_agent_path: {best_agent_path}")
+
+    # Calculate mean and std of validation rewards
+    val_reward_mean = float(np.mean(val_rewards)) if val_rewards else None
+    val_reward_std = float(np.std(val_rewards)) if val_rewards else None
+    val_rewards_stats = {"val_reward_mean": val_reward_mean, "val_reward_std": val_reward_std}
 
     # Run backtest
     backtest_metrics, backtest_portfolio = backtest_agent(
@@ -370,6 +403,7 @@ def process_window(
         best_agent_path,
         backtest_metrics,
         backtest_portfolio,
+        val_rewards_stats,
     )
 
 
@@ -399,12 +433,17 @@ def training_pipeline(
     drl_config.learning_rate_schedule = linear_schedule(
         drl_config.initial_lr, drl_config.final_lr
     )
+    
+    # Initialize prev_best_path with the provided model directory if available
+    prev_best_path = drl_config.prev_best_model_dir if drl_config.prev_best_model_dir else None
+    if prev_best_path:
+        print(f"Using previous best agent: {os.path.basename(prev_best_path)}")
 
     # Process each window
-    for idx_window in range(drl_config.n_windows):
-        current_start_year = drl_config.base_start_year + idx_window
+    for window_idx in range(drl_config.n_windows):
+        current_start_year = drl_config.base_start_year + window_idx
         print(
-            f"--- Starting Window {idx_window + 1}/{drl_config.n_windows} (Train Year Start: {current_start_year}) ---"
+            f"--- Starting Window {window_idx + 1}/{drl_config.n_windows} (Train Year Start: {current_start_year}) ---"
         )
 
         # Slice data for current window
@@ -420,16 +459,19 @@ def training_pipeline(
         )
 
         # Process window
-        prev_best_path = None
         if drl_config.seed_policy and best_agent_paths:
+            # Use the best agent from the previous window
             prev_best_path = best_agent_paths[-1]
             print(f"  Using previous best agent: {os.path.basename(prev_best_path)}")
+        elif drl_config.seed_policy and prev_best_path:
+            # For the first window, use the provided prev_best_model_dir if available
+            print(f"  Using provided best agent: {os.path.basename(prev_best_path)}")
         else:
             print("  Starting with fresh random initialization")
             prev_best_path = None
 
-        best_agent_path, window_results, backtest_portfolio = process_window(
-            window_idx=idx_window,
+        best_agent_path, window_results, backtest_portfolio, val_rewards_stats = process_window(
+            window_idx=window_idx,
             data_slices=data_slices,
             drl_config=drl_config,
             prev_best_path=prev_best_path,
@@ -438,11 +480,24 @@ def training_pipeline(
         best_agent_paths.append(best_agent_path)
         all_backtest_results.append(
             {
-                "window": idx_window + 1,
+                "window": window_idx + 1,
                 "best_agent_path": best_agent_path.split("/")[-1].split(".")[0],
                 **window_results,
+                **val_rewards_stats,
             }
         )
-        all_portfolios[idx_window] = backtest_portfolio
+        all_portfolios[window_idx] = backtest_portfolio
 
-    return all_backtest_results, all_portfolios
+        print("\n" + f"Saving backtest portfolio: {backtest_portfolio}" + "\n")
+        fname = f"portfolio_{window_idx + 1}_test={current_start_year + 6}.csv"
+        backtest_portfolio.get_history().to_csv(
+            os.path.join(drl_config.model_save_dir, fname)
+        )
+
+    results_filename = "backtest_results_summary.csv"
+    results_save_path = os.path.join(drl_config.model_save_dir, results_filename)
+
+    results_df = pd.DataFrame(all_backtest_results)
+    results_df.to_csv(results_save_path, index=False)
+
+    return results_df, all_portfolios
