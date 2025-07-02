@@ -17,8 +17,6 @@ class Portfolio:
         self.cash = self.initial_balance
         self.w_c = 1.0
         self.history = []
-        self.purchases = {asset: 0.0 for asset in self.tickers}
-        self.sales = {asset: 0.0 for asset in self.tickers}
         self.last_rebalance_date = None
 
     def __str__(self):
@@ -158,16 +156,6 @@ class Portfolio:
             else 0
             for t in valid_tickers
         }
-
-        # Calculate purchases and sales based on actual share changes
-        for t in valid_tickers:
-            share_diff = target_shares[t] - current_shares[t]
-            if share_diff > 0:
-                # Purchase
-                self.purchases[t] += share_diff * current_prices[t]
-            elif share_diff < 0:
-                # Sale
-                self.sales[t] += abs(share_diff) * current_prices[t]
 
         # Calculate per-step purchases and sales (total dollar amount)
         step_purchases = sum(
@@ -492,10 +480,5 @@ class Portfolio:
             showlegend=True,
             template='plotly_white'
         )
-        
-        # Update hover template
-        # fig.update_traces(
-        #     hovertemplate='Date: %{x}<br>Weight: %{y:.1%}<extra></extra>'
-        # )
         
         return fig

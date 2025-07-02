@@ -1,3 +1,5 @@
+import os
+import numpy as np
 import pandas as pd
 
 import seaborn as sns
@@ -6,6 +8,38 @@ import matplotlib.ticker as mtick
 
 import plotly.express as px
 import plotly.graph_objects as go
+from plotly.colors import diverging, sequential
+
+
+def get_drl_portfolios(drl_model_dir: str):
+    # get csv files in dir where fname contains portfolio
+    csv_files = sorted(
+        [
+            f
+            for f in os.listdir(drl_model_dir)
+            if f.endswith(".csv") and "portfolio" in f
+        ]
+    )
+    print(csv_files)
+
+    # load csv files
+    dfs = []
+    for file in csv_files:
+        df = pd.read_csv(os.path.join(drl_model_dir, file))
+        df.reset_index(inplace=True)
+        # rename index to trading_day
+        df.rename(columns={"index": "trading_day"}, inplace=True)
+        df["date"] = pd.to_datetime(df["date"])
+        df["year"] = df["date"].dt.year
+        dfs.append(df)
+
+    df_drl_port = (
+        pd.concat(dfs, ignore_index=True)
+        .sort_values(by=["date"])
+        .reset_index(drop=True)
+    )
+
+    return df_drl_port
 
 
 def plot_portfolio_val(
@@ -185,6 +219,45 @@ def calc_monthly_annual_rets(focus_df: pd.DataFrame, initial_balance: float):
     return monthly_pivot, annual_df
 
 
+def plot_drl_portfolios_interactive(df_drl_port: pd.DataFrame):
+    # plot portfolio value development with hue = year
+    # plt.figure(figsize=(15, 5))
+    # sns.lineplot(x="trading_day", y="portfolio_value", hue="year", data=df_drl_port)
+    # plt.axhline(y=100_000, color="grey", linestyle="--")
+    # plt.show()
+
+    # color_sequence = diverging.RdBu
+    color_sequence = sequential.Viridis
+
+    fig = px.line(
+        df_drl_port,
+        x="trading_day",
+        y="portfolio_value",
+        color="year",
+        color_discrete_sequence=color_sequence,
+        title="Portfolio Value Development by Year",
+    )
+
+    # Add horizontal line at y=100_000
+    fig.add_hline(
+        y=100_000,
+        line_dash="dash",
+        line_color="gray",
+        annotation_text="Initial Value",
+        annotation_position="top left",
+    )
+
+    fig.update_layout(
+        height=600,
+        width=1200,
+        xaxis_title="Trading Day",
+        yaxis_title="Portfolio Value",
+        legend_title="Year",
+    )
+
+    fig.show()
+
+
 def process_drl_portfolios(drl_port_df: pd.DataFrame, initial_balance: int = 100_000):
     """
     this works input df containing all DRL portfolios concatenated
@@ -354,3 +427,210 @@ def plot_fig4(monthly_pivot, annual_df, save_dir, fname):
     plt.tight_layout()
     plt.savefig(f"{save_dir}/{fname}.pdf", dpi=300)
     plt.show()
+
+
+def calc_portfolio_metrics(df: pd.DataFrame, risk_free_rate: float = 0):
+    """
+    Calculate comprehensive portfolio performance metrics.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        DataFrame containing at least 'date' and 'portfolio_value' columns.
+        Optional: 'purchases' and 'sales' for turnover.
+    risk_free_rate : float, optional
+        Annualized risk-free rate used in Sharpe, Sortino, Omega ratio.
+
+    Returns
+    -------
+    dict
+        Dictionary of performance metrics.
+    """
+    df = df.copy()
+    df["date"] = pd.to_datetime(df["date"])
+    df = df.sort_values("date")
+    portfolio_values = df["portfolio_value"].values
+
+    if len(portfolio_values) < 2:
+        return {}
+
+    # Calculate daily returns
+    daily_returns = df["portfolio_value"].pct_change().dropna().values
+
+    # Basic return metrics
+    pv_initial = portfolio_values[0]
+    pv_final = portfolio_values[-1]
+    annual_return = (pv_final / pv_initial) ** (252 / len(daily_returns)) - 1
+    cumulative_return = (pv_final / pv_initial) - 1
+
+    # Volatility
+    annual_volatility = np.std(daily_returns) * np.sqrt(252)
+
+    # Risk-adjusted return metrics
+    daily_risk_free_rate = risk_free_rate / 252
+    excess_returns = daily_returns - daily_risk_free_rate
+    std_dev_returns = np.std(daily_returns)
+
+    sharpe_ratio = (
+        np.mean(excess_returns) / std_dev_returns * np.sqrt(252)
+        if std_dev_returns > 1e-9
+        else np.nan
+    )
+
+    # Drawdown metrics
+    rolling_max = np.maximum.accumulate(portfolio_values)
+    drawdowns = (portfolio_values - rolling_max) / rolling_max
+    max_drawdown = (
+        np.min(drawdowns) if len(drawdowns) > 0 and np.any(rolling_max > 0) else 0.0
+    )
+
+    calmar_ratio = (
+        annual_return / abs(max_drawdown)
+        if abs(max_drawdown) > 1e-9 and pd.notna(annual_return)
+        else np.nan
+    )
+
+    # Sortino ratio
+    negative_returns = daily_returns[daily_returns < daily_risk_free_rate]
+    if len(negative_returns) > 0:
+        downside_std_dev = np.std(negative_returns)
+        sortino_ratio = (
+            np.mean(excess_returns) / downside_std_dev * np.sqrt(252)
+            if downside_std_dev > 1e-9
+            else np.nan
+        )
+    else:
+        mean_er = np.mean(excess_returns)
+        sortino_ratio = (
+            np.inf if mean_er > 1e-9 else (0 if abs(mean_er) < 1e-9 else np.nan)
+        )
+
+    # Omega ratio
+    threshold = daily_risk_free_rate
+    gains = daily_returns[daily_returns > threshold] - threshold
+    losses = daily_returns[daily_returns <= threshold] - threshold
+    sum_gains = np.sum(gains)
+    sum_abs_losses = abs(np.sum(losses))
+    omega_ratio = (
+        np.inf
+        if sum_abs_losses < 1e-9 and sum_gains > 1e-9
+        else (
+            1
+            if sum_abs_losses < 1e-9 and abs(sum_gains) < 1e-9
+            else (sum_gains / sum_abs_losses if sum_abs_losses >= 1e-9 else np.nan)
+        )
+    )
+
+    # Distribution statistics
+    skew = pd.Series(daily_returns).skew()
+    kurtosis = pd.Series(daily_returns).kurtosis()
+
+    # Tail metrics
+    tail_ratio = np.nan
+    var_95 = np.nan
+    if len(daily_returns) >= 20:
+        percentile_5 = np.percentile(daily_returns, 5)
+        percentile_95 = np.percentile(daily_returns, 95)
+        var_95 = percentile_5
+        tail_ratio = (
+            np.inf
+            if abs(percentile_5) < 1e-9 and percentile_95 > 1e-9
+            else (1 if abs(percentile_5) < 1e-9 else percentile_95 / abs(percentile_5))
+        )
+
+    # Stability
+    stability = 1 / (1 + annual_volatility) if pd.notna(annual_volatility) else np.nan
+
+    # Portfolio turnover
+    if "purchases" in df.columns and "sales" in df.columns:
+        df["year"] = df["date"].dt.year
+        turnovers = []
+        for year, group in df.groupby("year"):
+            purchases = group["purchases"].sum()
+            sales = group["sales"].sum()
+            avg_value = group["portfolio_value"].mean()
+            turnover = min(purchases, sales) / avg_value if avg_value > 0 else np.nan
+            turnovers.append(turnover)
+        annual_turnover = np.nanmean(turnovers)
+    else:
+        annual_turnover = np.nan
+
+    return {
+        # returns
+        "Annual Returns": annual_return,
+        "Cumulative Returns": cumulative_return,
+        "Stability": stability,
+        # risk
+        "Annual Volatility": annual_volatility,
+        "Max Drawdown": max_drawdown,
+        "Daily VaR (95%)": var_95,
+        "Tail Ratio": tail_ratio,
+        # risk-adjusted returns
+        "Sharpe Ratio": sharpe_ratio,
+        "Calmar Ratio": calmar_ratio,
+        "Omega Ratio": omega_ratio,
+        "Sortino Ratio": sortino_ratio,
+        # others
+        "Skew": skew,
+        "Kurtosis": kurtosis,
+        "Turnover": annual_turnover,
+    }
+
+
+def compute_strategy_metrics(
+    mvo_df,
+    naive_df,
+    buy_n_hold_df,
+    drl_dfs: dict[str, pd.DataFrame],
+    lookbacks,
+):
+    """
+    Compute average yearly portfolio metrics for multiple strategies and lookback periods.
+
+    Parameters:
+    - mvo_df: DataFrame with a 'lookback' column and datetime index
+    - naive_df: naive portfolio DataFrame with datetime index
+    - buy_n_hold_df: buy and hold DataFrame with a 'Date' column
+    - drl_df: DRL strategy DataFrame with datetime index
+    - lookbacks: list of integers specifying lookback periods to evaluate
+    - eval_n_plot: module or object with `calc_portfolio_metrics(df)` method
+
+    Returns:
+    - metrics_summary_df: DataFrame where each column is a strategy/lookback combination
+    """
+
+    results = {}
+
+    # DRL strategy
+    for model_name, df in drl_dfs.items():
+        metrics = [calc_portfolio_metrics(df_yr) for _, df_yr in df.groupby("year")]
+        results[f"DRL_{model_name}"] = pd.DataFrame(metrics).mean()
+
+    for lb in lookbacks:
+        # MVO
+        df = (
+            mvo_df[mvo_df["lookback"] == lb]
+            .reset_index()
+            .rename(columns={"index": "date"})
+            .copy()
+        )
+        df["year"] = df["date"].dt.year
+        metrics = [calc_portfolio_metrics(df_yr) for _, df_yr in df.groupby("year")]
+        results[f"MVO_{lb}"] = pd.DataFrame(metrics).mean()
+
+    # Naive portfolio (only one version, no lookback variation)
+    df = naive_df.copy().reset_index().rename(columns={"index": "date"})
+    df["year"] = df["date"].dt.year
+    metrics = [calc_portfolio_metrics(df_yr) for _, df_yr in df.groupby("year")]
+    results["Naive"] = pd.DataFrame(metrics).mean()
+
+    # Buy & Hold
+    df = buy_n_hold_df.copy().reset_index().rename(columns={"Date": "date"})
+    df["year"] = df["date"].dt.year
+    metrics = [calc_portfolio_metrics(df_yr) for _, df_yr in df.groupby("year")]
+    results["Buy_n_Hold"] = pd.DataFrame(metrics).mean()
+
+    # Combine results into single DataFrame
+    metrics_summary_df = pd.DataFrame(results)
+
+    return metrics_summary_df

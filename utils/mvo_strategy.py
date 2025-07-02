@@ -52,7 +52,6 @@ class MVOStrategy:
         
         self.portfolio = Portfolio(tickers, initial_cash)
         self.skipped_dates = []
-        self.prev_weights = {t: 1.0 / len(tickers) for t in tickers}  # Start with equal weights
 
     @staticmethod
     def negative_sharpe_ratio(weights, mean_returns, cov_matrix, risk_free_rate):
@@ -88,13 +87,7 @@ class MVOStrategy:
         mu = return_window.mean()
         if (mu < 0).all():
             self.skipped_dates.extend(return_window.index)
-            # Return previous weights (for current tickers)
-            prev = {t: self.prev_weights.get(t, 0) for t in return_window.columns}
-            # Normalize in case tickers changed
-            total = sum(prev.values())
-            if total > 0:
-                prev = {k: v / total for k, v in prev.items()}
-            return prev
+            return None
 
         if method == "skfolio":
             model = MeanRisk(
@@ -112,7 +105,6 @@ class MVOStrategy:
             model.fit(return_window)
             weights = model.weights_
             weights_dict = dict(zip(return_window.columns, weights))
-            self.prev_weights = weights_dict.copy()
             return weights_dict
 
         else:
@@ -135,7 +127,6 @@ class MVOStrategy:
                     weights_sum_to_one=True,
                 )
                 weights_dict = dict(weights_array)
-                self.prev_weights = weights_dict.copy()
                 return weights_dict
 
             if method == "scipy":
@@ -167,7 +158,6 @@ class MVOStrategy:
                     return {t: 0 for t in return_window.columns}
 
                 weights_dict = dict(zip(return_window.columns, result["x"]))
-                self.prev_weights = weights_dict.copy()
                 return weights_dict
 
     def backtest(
@@ -302,6 +292,9 @@ class NaiveStrategy:
             # Get equal weights
             weights = self.get_weights(return_window)
             if weights is None:
+                # no new weights, but still update portfolio value with current prices
+                # using update function
+                self.portfolio.update(prices_today, date=eval_date)
                 continue
 
             # Rebalance portfolio
