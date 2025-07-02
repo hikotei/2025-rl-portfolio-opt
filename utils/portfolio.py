@@ -169,6 +169,14 @@ class Portfolio:
                 # Sale
                 self.sales[t] += abs(share_diff) * current_prices[t]
 
+        # Calculate per-step purchases and sales (total dollar amount)
+        step_purchases = sum(
+            max(target_shares[t] - current_shares[t], 0) * current_prices[t] for t in valid_tickers
+        )
+        step_sales = sum(
+            max(current_shares[t] - target_shares[t], 0) * current_prices[t] for t in valid_tickers
+        )
+
         # Update holdings with new shares
         self.positions = target_shares
 
@@ -202,6 +210,9 @@ class Portfolio:
             record[f"w_{t}"] = round(self.weights[t], 4)
         for t in self.tickers:
             record[f"s_{t}"] = round(self.positions.get(t, 0))
+
+        record['purchases'] = step_purchases
+        record['sales'] = step_sales
 
         self.history.append(record)
         self.last_rebalance_date = date
@@ -354,12 +365,20 @@ class Portfolio:
             1 / (1 + annual_volatility) if pd.notna(annual_volatility) else np.nan
         )
 
-        # Calculate portfolio turnover
-        total_purchases = sum(self.purchases.values())
-        total_sales = sum(self.sales.values())
-        portfolio_values = [record["portfolio_value"] for record in self.history]
-        avg_portfolio_value = sum(portfolio_values) / len(portfolio_values)
-        portfolio_turnover = min(total_purchases, total_sales) / avg_portfolio_value
+        # Calculate portfolio turnover (calendar year bucketed)
+        df = pd.DataFrame(self.history)
+        if 'purchases' in df.columns and 'sales' in df.columns:
+            df['year'] = pd.to_datetime(df['date']).dt.year
+            turnovers = []
+            for year, group in df.groupby('year'):
+                purchases = group['purchases'].sum()
+                sales = group['sales'].sum()
+                avg_value = group['portfolio_value'].mean()
+                turnover = min(purchases, sales) / avg_value if avg_value > 0 else np.nan
+                turnovers.append(turnover)
+            annual_turnover = np.nanmean(turnovers)
+        else:
+            annual_turnover = np.nan
 
         return {
             "Annual return": annual_return,
@@ -375,7 +394,7 @@ class Portfolio:
             "Kurtosis": kurtosis,
             "Tail ratio": tail_ratio,
             "Daily value at risk (95%)": var_95,
-            "Portfolio turnover (in %)": portfolio_turnover,
+            "Avg Annual Turnover (in %)": annual_turnover,
         }
 
     def plot_value_history(self):

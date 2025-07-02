@@ -52,6 +52,7 @@ class MVOStrategy:
         
         self.portfolio = Portfolio(tickers, initial_cash)
         self.skipped_dates = []
+        self.prev_weights = {t: 1.0 / len(tickers) for t in tickers}  # Start with equal weights
 
     @staticmethod
     def negative_sharpe_ratio(weights, mean_returns, cov_matrix, risk_free_rate):
@@ -86,10 +87,14 @@ class MVOStrategy:
 
         mu = return_window.mean()
         if (mu < 0).all():
-            # print(f"All returns are negative for {return_window.index.min()} to {return_window.index.max()}")
-            # instead of printing save the dates that are skipped
             self.skipped_dates.extend(return_window.index)
-            return {t: 0 for t in return_window.columns}
+            # Return previous weights (for current tickers)
+            prev = {t: self.prev_weights.get(t, 0) for t in return_window.columns}
+            # Normalize in case tickers changed
+            total = sum(prev.values())
+            if total > 0:
+                prev = {k: v / total for k, v in prev.items()}
+            return prev
 
         if method == "skfolio":
             model = MeanRisk(
@@ -106,7 +111,9 @@ class MVOStrategy:
             )
             model.fit(return_window)
             weights = model.weights_
-            return dict(zip(return_window.columns, weights))
+            weights_dict = dict(zip(return_window.columns, weights))
+            self.prev_weights = weights_dict.copy()
+            return weights_dict
 
         else:
             lw = SklearnLedoitWolf()
@@ -127,7 +134,9 @@ class MVOStrategy:
                     objective_args=(ef.expected_returns, ef.cov_matrix),
                     weights_sum_to_one=True,
                 )
-                return dict(weights_array)
+                weights_dict = dict(weights_array)
+                self.prev_weights = weights_dict.copy()
+                return weights_dict
 
             if method == "scipy":
                 n_assets = len(return_window.columns)
@@ -157,7 +166,9 @@ class MVOStrategy:
                     print(f"Warning: Optimization failed: {result['message']}")
                     return {t: 0 for t in return_window.columns}
 
-                return dict(zip(return_window.columns, result["x"]))
+                weights_dict = dict(zip(return_window.columns, result["x"]))
+                self.prev_weights = weights_dict.copy()
+                return weights_dict
 
     def backtest(
         self,

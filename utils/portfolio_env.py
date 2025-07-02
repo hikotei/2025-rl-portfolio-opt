@@ -301,103 +301,103 @@ class PortfolioEnv(gym.Env):
         """
         pass
 
-    def calc_metrics(
-        self,
-        portfolio_values: Union[List[float], np.ndarray, pd.Series],
-        risk_free_rate: float = 0.02,
-    ):
-        """
-        Calculate various portfolio performance metrics.
+    # def calc_metrics(
+    #     self,
+    #     portfolio_values: Union[List[float], np.ndarray, pd.Series],
+    #     risk_free_rate: float = 0.02,
+    # ):
+    #     """
+    #     Calculate various portfolio performance metrics.
 
-        Args:
-            portfolio_values: Array of portfolio values over time
-            risk_free_rate: Annual risk-free rate (default: 2%)
+    #     Args:
+    #         portfolio_values: Array of portfolio values over time
+    #         risk_free_rate: Annual risk-free rate (default: 2%)
 
-        Returns:
-            Dictionary containing various portfolio metrics
-        """
-        # Convert to numpy array if needed
-        if isinstance(portfolio_values, (list, pd.Series)):
-            portfolio_values = np.array(portfolio_values)
+    #     Returns:
+    #         Dictionary containing various portfolio metrics
+    #     """
+    #     # Convert to numpy array if needed
+    #     if isinstance(portfolio_values, (list, pd.Series)):
+    #         portfolio_values = np.array(portfolio_values)
 
-        # Calculate daily returns
-        daily_returns = np.diff(portfolio_values) / portfolio_values[:-1]
+    #     # Calculate daily returns
+    #     daily_returns = np.diff(portfolio_values) / portfolio_values[:-1]
 
-        # Annual return (assuming 252 trading days)
-        annual_return = (portfolio_values[-1] / portfolio_values[0]) ** (
-            252 / len(portfolio_values)
-        ) - 1
+    #     # Annual return (assuming 252 trading days)
+    #     annual_return = (portfolio_values[-1] / portfolio_values[0]) ** (
+    #         252 / len(portfolio_values)
+    #     ) - 1
 
-        # Cumulative returns
-        cumulative_return = (portfolio_values[-1] / portfolio_values[0]) - 1
+    #     # Cumulative returns
+    #     cumulative_return = (portfolio_values[-1] / portfolio_values[0]) - 1
 
-        # Annual volatility
-        annual_volatility = np.std(daily_returns) * np.sqrt(252)
+    #     # Annual volatility
+    #     annual_volatility = np.std(daily_returns) * np.sqrt(252)
 
-        # Sharpe ratio
-        excess_returns = daily_returns - risk_free_rate / 252
-        sharpe_ratio = np.sqrt(252) * np.mean(excess_returns) / np.std(daily_returns)
+    #     # Sharpe ratio
+    #     excess_returns = daily_returns - risk_free_rate / 252
+    #     sharpe_ratio = np.sqrt(252) * np.mean(excess_returns) / np.std(daily_returns)
 
-        # Maximum drawdown
-        rolling_max = np.maximum.accumulate(portfolio_values)
-        drawdowns = (portfolio_values - rolling_max) / rolling_max
-        max_drawdown = np.min(drawdowns)
+    #     # Maximum drawdown
+    #     rolling_max = np.maximum.accumulate(portfolio_values)
+    #     drawdowns = (portfolio_values - rolling_max) / rolling_max
+    #     max_drawdown = np.min(drawdowns)
 
-        # Calmar ratio
-        calmar_ratio = annual_return / abs(max_drawdown) if max_drawdown != 0 else 0
+    #     # Calmar ratio
+    #     calmar_ratio = annual_return / abs(max_drawdown) if max_drawdown != 0 else 0
 
-        # Sortino ratio (using negative returns only)
-        negative_returns = daily_returns[daily_returns < 0]
-        sortino_ratio = (
-            np.sqrt(252) * np.mean(excess_returns) / np.std(negative_returns)
-            if len(negative_returns) > 0
-            else 0
-        )
+    #     # Sortino ratio (using negative returns only)
+    #     negative_returns = daily_returns[daily_returns < 0]
+    #     sortino_ratio = (
+    #         np.sqrt(252) * np.mean(excess_returns) / np.std(negative_returns)
+    #         if len(negative_returns) > 0
+    #         else 0
+    #     )
 
-        # Omega ratio
-        threshold = risk_free_rate / 252
-        positive_returns = daily_returns[daily_returns > threshold]
-        negative_returns = daily_returns[daily_returns <= threshold]
-        omega_ratio = (
-            np.sum(positive_returns - threshold)
-            / abs(np.sum(negative_returns - threshold))
-            if len(negative_returns) > 0
-            else float("inf")
-        )
+    #     # Omega ratio
+    #     threshold = risk_free_rate / 252
+    #     positive_returns = daily_returns[daily_returns > threshold]
+    #     negative_returns = daily_returns[daily_returns <= threshold]
+    #     omega_ratio = (
+    #         np.sum(positive_returns - threshold)
+    #         / abs(np.sum(negative_returns - threshold))
+    #         if len(negative_returns) > 0
+    #         else float("inf")
+    #     )
 
-        # Skewness and Kurtosis
-        skew = pd.Series(daily_returns).skew()
-        kurtosis = pd.Series(daily_returns).kurtosis()
+    #     # Skewness and Kurtosis
+    #     skew = pd.Series(daily_returns).skew()
+    #     kurtosis = pd.Series(daily_returns).kurtosis()
 
-        # Tail ratio (95th percentile / 5th percentile)
-        tail_ratio = np.percentile(daily_returns, 95) / abs(
-            np.percentile(daily_returns, 5)
-        )
+    #     # Tail ratio (95th percentile / 5th percentile)
+    #     tail_ratio = np.percentile(daily_returns, 95) / abs(
+    #         np.percentile(daily_returns, 5)
+    #     )
 
-        # Value at Risk (95%)
-        var = np.percentile(daily_returns, 5)
+    #     # Value at Risk (95%)
+    #     var = np.percentile(daily_returns, 5)
 
-        # Portfolio turnover (average daily change in weights)
-        daily_change = np.mean(
-            np.abs(np.diff(portfolio_values) / portfolio_values[:-1])
-        )
+    #     # Portfolio turnover (average daily change in weights)
+    #     daily_change = np.mean(
+    #         np.abs(np.diff(portfolio_values) / portfolio_values[:-1])
+    #     )
 
-        # Stability (inverse of volatility)
-        stability = 1 / (1 + annual_volatility)
+    #     # Stability (inverse of volatility)
+    #     stability = 1 / (1 + annual_volatility)
 
-        return {
-            "Annual return": annual_return,
-            "Cumulative returns": cumulative_return,
-            "Annual volatility": annual_volatility,
-            "Sharpe ratio": sharpe_ratio,
-            "Calmar ratio": calmar_ratio,
-            "Stability": stability,
-            "Max drawdown": max_drawdown,
-            "Omega ratio": omega_ratio,
-            "Sortino ratio": sortino_ratio,
-            "Skew": skew,
-            "Kurtosis": kurtosis,
-            "Tail ratio": tail_ratio,
-            "Daily value at risk": var,
-            "Portfolio turnover": daily_change,
-        }
+    #     return {
+    #         "Annual return": annual_return,
+    #         "Cumulative returns": cumulative_return,
+    #         "Annual volatility": annual_volatility,
+    #         "Sharpe ratio": sharpe_ratio,
+    #         "Calmar ratio": calmar_ratio,
+    #         "Stability": stability,
+    #         "Max drawdown": max_drawdown,
+    #         "Omega ratio": omega_ratio,
+    #         "Sortino ratio": sortino_ratio,
+    #         "Skew": skew,
+    #         "Kurtosis": kurtosis,
+    #         "Tail ratio": tail_ratio,
+    #         "Daily value at risk": var,
+    #         "Portfolio turnover": daily_change,
+    #     }

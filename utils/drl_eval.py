@@ -6,7 +6,9 @@ from utils.config import DRLConfig
 from utils.drl_train import backtest_agent, slice_data
 
 
-def find_best_agents(model_dir: str, n_windows: int) -> Tuple[List[str], Dict[int, List[float]]]:
+def find_best_agents(
+    model_dir: str, n_windows: int
+) -> Tuple[List[str], Dict[int, List[float]]]:
     """
     For each window, find the agent file with the highest val reward in its filename.
     Also collect all validation rewards for each window.
@@ -20,7 +22,7 @@ def find_best_agents(model_dir: str, n_windows: int) -> Tuple[List[str], Dict[in
     ]
     window_best = {}
     window_rewards = {}
-    
+
     for f in agent_files:
         window = int(f.split("agent_")[1].split("-")[0])
         val = float(f.split("_valrew=")[1].split(".zip")[0])
@@ -53,7 +55,9 @@ def evaluation_pipeline(
     all_backtest_results = []
     all_portfolios = {}
 
-    best_agent_paths, window_rewards = find_best_agents(drl_config.model_save_dir, drl_config.n_windows)
+    best_agent_paths, window_rewards = find_best_agents(
+        drl_config.model_save_dir, drl_config.n_windows
+    )
 
     for window_idx, agent_path in enumerate(best_agent_paths):
         current_start_year = drl_config.base_start_year + window_idx
