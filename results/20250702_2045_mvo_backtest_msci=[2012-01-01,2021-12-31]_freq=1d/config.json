@@ -1,0 +1,31 @@
+{
+    "freq": "1d",
+    "data_dir": "../data/msci",
+    "lookback_periods": [
+        10,
+        30,
+        60,
+        90,
+        120,
+        150,
+        252,
+        504,
+        756,
+        1008,
+        1260,
+        1512
+    ],
+    "START_DATE": "2012-01-01",
+    "END_DATE": "2021-12-31",
+    "results_dir": "../results/20250702_2045_mvo_backtest_msci=[2012-01-01,2021-12-31]_freq=1d",
+    "sector_tickers": [
+        "Canada",
+        "France",
+        "Germany",
+        "Italy",
+        "Japan",
+        "Switzerland",
+        "UK",
+        "US"
+    ]
+}

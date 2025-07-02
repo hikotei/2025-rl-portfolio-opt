@@ -1,6 +1,7 @@
 # Own Ignores
 .DS_Store
 .zip
+./models/backup/*
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

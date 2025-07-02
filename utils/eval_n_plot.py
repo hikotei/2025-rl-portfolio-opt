@@ -13,10 +13,11 @@ def plot_portfolio_val(
     END_DATE: str,
     mvo_history_df: pd.DataFrame,
     naive_portfolio_df: pd.DataFrame = None,
-    ref_df: pd.DataFrame = None,
+    df_ref: pd.DataFrame = None,
     ref_ticker: str = None,
     initial_shares: float = None,
-    results_dir: str = None,
+    save_dir: str = None,
+    fname: str = None,
     title: str = None,
 ):
     # reset sns style
@@ -51,7 +52,7 @@ def plot_portfolio_val(
 
     # plot direct investment in SPY
     plt.plot(
-        ref_df[ref_ticker].loc[START_DATE:END_DATE] * initial_shares,
+        df_ref[ref_ticker].loc[START_DATE:END_DATE] * initial_shares,
         c="k",
         label=ref_ticker,
         lw=1.5,
@@ -62,8 +63,9 @@ def plot_portfolio_val(
     plt.xlabel("Date")
     plt.ylabel("Portfolio Value")
     plt.legend()
+    plt.tight_layout()
     # save plot
-    plt.savefig(f"{results_dir}/mvo_portfolio_value.pdf", dpi=300)
+    plt.savefig(f"{save_dir}/{fname}.pdf", dpi=300)
     plt.show()
 
 
@@ -72,7 +74,7 @@ def plot_portfolio_val_interactive(
     END_DATE: str,
     mvo_history_df: pd.DataFrame,
     naive_portfolio_df: pd.DataFrame = None,
-    ref_df: pd.DataFrame = None,
+    df_ref: pd.DataFrame = None,
     ref_ticker: str = None,
     initial_shares: float = None,
 ):
@@ -111,7 +113,7 @@ def plot_portfolio_val_interactive(
         )
 
     # Add direct investment in SPY
-    spy_series = ref_df[ref_ticker].loc[START_DATE:END_DATE] * initial_shares
+    spy_series = df_ref[ref_ticker].loc[START_DATE:END_DATE] * initial_shares
     fig.add_trace(
         go.Scatter(
             x=spy_series.index,
@@ -183,7 +185,7 @@ def calc_monthly_annual_rets(focus_df: pd.DataFrame, initial_balance: float):
     return monthly_pivot, annual_df
 
 
-def process_drl_portfolios(drl_port_df: pd.DataFrame, initial_balance : int = 100_000):
+def process_drl_portfolios(drl_port_df: pd.DataFrame, initial_balance: int = 100_000):
     """
     this works input df containing all DRL portfolios concatenated
     each portfolio is for one testing year and starts at 100k
@@ -202,7 +204,7 @@ def process_drl_portfolios(drl_port_df: pd.DataFrame, initial_balance : int = 10
     years as rows and each months as a separate columns
 
     the annual_df output will be a df with
-    last date of each year as rows 
+    last date of each year as rows
     and columns : annual_ret, year, portfolio_value ( final )
     """
 
@@ -219,33 +221,41 @@ def process_drl_portfolios(drl_port_df: pd.DataFrame, initial_balance : int = 10
 
         # === Monthly Returns ===
         month_end = group["portfolio_value"].resample("ME").last()
-        month_start = pd.Series([initial_balance], index=[month_end.index.min() - pd.offsets.MonthEnd(1)])
+        month_start = pd.Series(
+            [initial_balance], index=[month_end.index.min() - pd.offsets.MonthEnd(1)]
+        )
         monthly = pd.concat([month_start, month_end])
         monthly_ret = monthly.pct_change().iloc[1:] * 100
 
         for idx, ret in monthly_ret.items():
-            monthly_records.append({"year": year, "month": idx.month, "monthly_ret": ret})
+            monthly_records.append(
+                {"year": year, "month": idx.month, "monthly_ret": ret}
+            )
 
         # === Annual Return ===
         final_value = group["portfolio_value"].iloc[-1]
         annual_ret = (final_value / initial_balance - 1) * 100
-        annual_records.append({
-            "year": year,
-            "portfolio_value": final_value,
-            "annual_ret": annual_ret,
-            "date": group.index[-1]
-        })
+        annual_records.append(
+            {
+                "year": year,
+                "portfolio_value": final_value,
+                "annual_ret": annual_ret,
+                "date": group.index[-1],
+            }
+        )
 
     # Construct outputs
     monthly_df = pd.DataFrame(monthly_records)
-    monthly_pivot = monthly_df.pivot(index="year", columns="month", values="monthly_ret").sort_index()
+    monthly_pivot = monthly_df.pivot(
+        index="year", columns="month", values="monthly_ret"
+    ).sort_index()
 
     annual_df = pd.DataFrame(annual_records).set_index("date").sort_index()
 
     return monthly_pivot, annual_df
 
 
-def plot_fig2(mvo_metrics_df: pd.DataFrame, results_dir: str, fname: str):
+def plot_fig2(mvo_metrics_df: pd.DataFrame, save_dir: str, fname: str):
     sns.reset_defaults()
     sns.set_theme(style="whitegrid")
     sns.set_context("paper")
@@ -274,11 +284,11 @@ def plot_fig2(mvo_metrics_df: pd.DataFrame, results_dir: str, fname: str):
         ax.legend()
 
     plt.tight_layout()
-    plt.savefig(f"{results_dir}/{fname}.pdf", dpi=300)
+    plt.savefig(f"{save_dir}/{fname}.pdf", dpi=300)
     plt.show()
 
 
-def plot_fig4(monthly_pivot, annual_df, results_dir, fname):
+def plot_fig4(monthly_pivot, annual_df, save_dir, fname):
     monthly_rets = monthly_pivot.values.reshape(-1)
     annual_mean = annual_df["annual_ret"].mean()
 
@@ -287,7 +297,7 @@ def plot_fig4(monthly_pivot, annual_df, results_dir, fname):
     sns.set_context("talk")
 
     fig, axes = plt.subplots(1, 3, figsize=(18, 6))
-    
+
     # 1. Monthly heatmap
     sns.heatmap(
         monthly_pivot,
@@ -309,7 +319,13 @@ def plot_fig4(monthly_pivot, annual_df, results_dir, fname):
 
     # 2. Annual returns bar chart (scaled to %)
     axes[1].barh(annual_df["year"], annual_df["annual_ret"], color="steelblue")
-    axes[1].axvline(x=annual_mean, color="skyblue", linestyle="--", lw=3, label=f"Mean = {annual_mean:.2f}%")
+    axes[1].axvline(
+        x=annual_mean,
+        color="skyblue",
+        linestyle="--",
+        lw=3,
+        label=f"Mean = {annual_mean:.2f}%",
+    )
     axes[1].set_title("Annual returns")
     axes[1].set_yticks(annual_df["year"])
     axes[1].invert_yaxis()
@@ -317,7 +333,11 @@ def plot_fig4(monthly_pivot, annual_df, results_dir, fname):
     # 3. Monthly return distribution
     axes[2].hist(monthly_rets, bins=20, color="#ff5812", edgecolor="white")
     axes[2].axvline(
-        x=monthly_rets.mean(), color="gold", linestyle="--", lw=3, label=f"Mean = {monthly_rets.mean():.2f}%"
+        x=monthly_rets.mean(),
+        color="gold",
+        linestyle="--",
+        lw=3,
+        label=f"Mean = {monthly_rets.mean():.2f}%",
     )
     axes[2].set_title("Distribution of monthly returns")
     axes[2].set_ylabel("Number of months")
@@ -332,5 +352,5 @@ def plot_fig4(monthly_pivot, annual_df, results_dir, fname):
     # Super title and layout
     # plt.suptitle(f"Performance of MVO strategy with lookback = {lookback}")
     plt.tight_layout()
-    plt.savefig(f"{results_dir}/{fname}.pdf", dpi=300)
+    plt.savefig(f"{save_dir}/{fname}.pdf", dpi=300)
     plt.show()
